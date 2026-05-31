@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily News Radio</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <span class="logo-icon">📻</span>
+        <div>
+          <h1>Daily News Radio</h1>
+          <p class="tagline">AIが届ける、あなたの毎朝のニュース</p>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- プレイヤー -->
+      <section class="player-section" id="player-section" style="display:none">
+        <div class="now-playing">
+          <div class="broadcast-info">
+            <span class="on-air" id="on-air-badge">ON AIR</span>
+            <span class="broadcast-date" id="broadcast-date"></span>
+            <span class="news-count" id="news-count"></span>
+          </div>
+          <audio id="audio-player" controls preload="none">
+            <source id="audio-source" src="" type="audio/mpeg">
+          </audio>
+          <div class="playback-controls">
+            <button class="speed-btn" onclick="setSpeed(0.8)">0.8x</button>
+            <button class="speed-btn active" onclick="setSpeed(1.0)">1.0x</button>
+            <button class="speed-btn" onclick="setSpeed(1.2)">1.2x</button>
+            <button class="speed-btn" onclick="setSpeed(1.5)">1.5x</button>
+          </div>
+        </div>
+
+        <!-- スクリプト表示 -->
+        <details class="script-detail">
+          <summary>放送原稿を読む</summary>
+          <div class="script-text" id="script-text"></div>
+        </details>
+
+        <!-- ニュース一覧 -->
+        <details class="news-detail" open>
+          <summary>今日のニュース一覧</summary>
+          <ul class="news-list" id="news-list"></ul>
+        </details>
+      </section>
+
+      <!-- 生成中 -->
+      <section class="generating-section" id="generating-section" style="display:none">
+        <div class="spinner"></div>
+        <p>ニュースを収集してラジオ原稿を生成中...</p>
+        <p class="sub-text">初回は2〜3分ほどかかります</p>
+      </section>
+
+      <!-- 空状態 -->
+      <section class="empty-section" id="empty-section">
+        <div class="empty-icon">📡</div>
+        <h2>まだ今日の放送がありません</h2>
+        <p>ボタンを押してニュースを収集・生成してください</p>
+        <button class="generate-btn" onclick="startGeneration()">
+          今日のニュースラジオを生成する
+        </button>
+      </section>
+
+      <!-- アーカイブ -->
+      <section class="archive-section">
+        <h2>過去の放送</h2>
+        <ul class="archive-list" id="archive-list">
+          <li class="loading">読み込み中...</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
