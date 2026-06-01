@@ -2,9 +2,11 @@
 __pycache__/
 *.pyc
 *.pyo
-*.db
-audio/*.mp3
+news_radio.db
 .venv/
 venv/
 *.egg-info/
 dist/
+
+# 古い音声（30日超）は Actions が自動削除。MP3 は管理対象
+# audio/*.mp3 は追跡する（コメントアウト）

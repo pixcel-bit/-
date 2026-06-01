@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0f14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ニュースラジオ">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <title>Daily News Radio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ========== オンボーディング ========== -->
+  <div id="screen-onboarding" class="screen" style="display:none">
+    <div class="onboarding-inner">
+      <div class="onboarding-logo">
+        <img src="icon.svg" width="80" height="80" alt="">
+        <h1>Daily News Radio</h1>
+        <p>AIが届ける、毎朝のニュースラジオ</p>
+      </div>
+      <div class="onboarding-form">
+        <p class="onboarding-desc">チャット機能を使うには Anthropic の API キーが必要です。毎日の自動放送はキーなしでも聴けます。</p>
+        <label>
+          <span>Anthropic API キー（任意）</span>
+          <div class="input-row">
+            <input id="onboarding-key" type="password" placeholder="sk-ant-... （あとで設定画面から入力も可）" autocomplete="off" spellcheck="false">
+            <button type="button" class="toggle-vis" onclick="toggleVis('onboarding-key')">👁</button>
+          </div>
+          <small>キーはこの端末にのみ保存されます。サーバーには送信されません。</small>
+        </label>
+        <button class="btn-primary" onclick="onboardingSubmit()">はじめる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== メインアプリ ========== -->
+  <div id="screen-main" class="screen" style="display:none">
+
+    <!-- ホームタブ -->
+    <div id="tab-home" class="tab-content">
+      <div class="page-header">
+        <span class="header-logo">📻</span>
+        <h2>Daily News Radio</h2>
+        <button class="icon-btn" onclick="refreshToday()" title="更新">↺</button>
+      </div>
+
+      <div id="home-loading" class="status-card"><div class="spinner"></div><p>読み込み中...</p></div>
+      <div id="home-generating" class="status-card" style="display:none">
+        <div class="spinner"></div>
+        <p>今日のニュースを準備中です</p>
+        <p class="sub">毎朝6時に自動生成されます</p>
+      </div>
+      <div id="home-error" class="status-card error" style="display:none">
+        <div class="error-icon">⚠️</div>
+        <p id="home-error-msg"></p>
+        <button class="btn-secondary" onclick="refreshToday()">再読み込み</button>
+      </div>
+      <div id="home-player" style="display:none">
+        <div class="player-card">
+          <div class="player-date" id="player-date"></div>
+          <div class="player-count" id="player-count"></div>
+          <div class="player-controls">
+            <audio id="main-audio" preload="none"></audio>
+            <button class="play-btn" id="play-btn" onclick="togglePlay('main-audio','play-btn')">▶</button>
+            <div class="progress-wrap">
+              <input type="range" id="main-seek" class="seek-bar" value="0" min="0" step="0.1" oninput="seekAudio('main-audio','main-seek')">
+              <div class="time-row">
+                <span id="main-current">0:00</span>
+                <span id="main-duration">–:––</span>
+              </div>
+            </div>
+          </div>
+          <div class="speed-row">
+            <span class="speed-label">速度</span>
+            <button class="speed-btn" onclick="setSpeed('main-audio',0.8,this)">0.8x</button>
+            <button class="speed-btn active" onclick="setSpeed('main-audio',1.0,this)">1.0x</button>
+            <button class="speed-btn" onclick="setSpeed('main-audio',1.2,this)">1.2x</button>
+            <button class="speed-btn" onclick="setSpeed('main-audio',1.5,this)">1.5x</button>
+          </div>
+        </div>
+        <details class="news-detail">
+          <summary>今日のニュース一覧</summary>
+          <ul class="news-list" id="home-news-list"></ul>
+        </details>
+        <details class="news-detail">
+          <summary>放送原稿を読む</summary>
+          <div class="script-text" id="home-script"></div>
+        </details>
+      </div>
+      <div id="home-empty" class="status-card" style="display:none">
+        <div class="empty-icon">📡</div>
+        <p>今日の放送はまだ準備中です</p>
+        <p class="sub">毎朝6時に自動生成されます</p>
+      </div>
+    </div>
+
+    <!-- チャットタブ -->
+    <div id="tab-chat" class="tab-content chat-tab" style="display:none">
+      <div class="page-header"><h2>カスタムニュース</h2></div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-hint">
+          <p>聴きたいニュースを<br>自由に話しかけてください</p>
+          <p class="chat-hint-note">端末のスピーカーで読み上げます</p>
+          <div class="chat-examples">
+            <button class="example-btn" onclick="fillExample(this)">IT・テクノロジーのニュースを教えて</button>
+            <button class="example-btn" onclick="fillExample(this)">今日の経済ニュースを3分で</button>
+            <button class="example-btn" onclick="fillExample(this)">海外のニュースだけまとめて</button>
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-bar">
+        <textarea id="chat-input" placeholder="ニュースのリクエストを入力..." rows="1" oninput="autoResize(this)" onkeydown="chatKeydown(event)"></textarea>
+        <button class="send-btn" onclick="sendChat()">送信</button>
+      </div>
+    </div>
+
+    <!-- 履歴タブ -->
+    <div id="tab-archive" class="tab-content" style="display:none">
+      <div class="page-header"><h2>過去の放送</h2></div>
+      <ul class="archive-list" id="archive-list"><li class="list-loading">読み込み中...</li></ul>
+    </div>
+
+    <!-- 設定タブ -->
+    <div id="tab-settings" class="tab-content" style="display:none">
+      <div class="page-header"><h2>設定</h2></div>
+      <div class="settings-body">
+        <section class="settings-section">
+          <h3>チャット機能用 APIキー</h3>
+          <label>
+            <span>Anthropic API キー</span>
+            <div class="input-row">
+              <input id="setting-key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+              <button type="button" class="toggle-vis" onclick="toggleVis('setting-key')">👁</button>
+            </div>
+            <small>チャットでカスタムニュースを生成するときに使います。毎日の自動放送には不要です。</small>
+          </label>
+        </section>
+        <section class="settings-section">
+          <h3>チャットの音声速度</h3>
+          <label>
+            <span>読み上げ速度</span>
+            <select id="setting-rate">
+              <option value="0.8">ゆっくり (0.8x)</option>
+              <option value="1.0" selected>普通 (1.0x)</option>
+              <option value="1.2">少し速い (1.2x)</option>
+              <option value="1.5">速い (1.5x)</option>
+            </select>
+          </label>
+        </section>
+        <button class="btn-primary settings-save" onclick="saveSettings()">保存する</button>
+        <p class="settings-note">設定はこの端末にのみ保存されます</p>
+      </div>
+    </div>
+
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="home"    onclick="switchTab('home')"><span class="tab-icon">🏠</span><span>ホーム</span></button>
+      <button class="tab-btn"        data-tab="chat"    onclick="switchTab('chat')"><span class="tab-icon">💬</span><span>チャット</span></button>
+      <button class="tab-btn"        data-tab="archive" onclick="switchTab('archive')"><span class="tab-icon">📋</span><span>履歴</span></button>
+      <button class="tab-btn"        data-tab="settings" onclick="switchTab('settings')"><span class="tab-icon">⚙️</span><span>設定</span></button>
+    </nav>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
