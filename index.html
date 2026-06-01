@@ -129,21 +129,26 @@
     <div id="tab-settings" class="tab-content" style="display:none">
       <div class="page-header"><h2>設定</h2></div>
       <div class="settings-body">
+
+        <!-- ── 端末設定 ── -->
+        <div class="settings-group-label">📱 端末の設定</div>
+
         <section class="settings-section">
-          <h3>チャット機能用 APIキー</h3>
+          <h3>チャット機能用 API キー</h3>
           <label>
             <span>Anthropic API キー</span>
             <div class="input-row">
               <input id="setting-key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
               <button type="button" class="toggle-vis" onclick="toggleVis('setting-key')">👁</button>
             </div>
-            <small>チャットでカスタムニュースを生成するときに使います。毎日の自動放送には不要です。</small>
+            <small>チャット機能で使います。毎日の自動放送には不要です。</small>
           </label>
         </section>
+
         <section class="settings-section">
-          <h3>チャットの音声速度</h3>
+          <h3>チャットの読み上げ速度</h3>
           <label>
-            <span>読み上げ速度</span>
+            <span>速度</span>
             <select id="setting-rate">
               <option value="0.8">ゆっくり (0.8x)</option>
               <option value="1.0" selected>普通 (1.0x)</option>
@@ -152,8 +157,104 @@
             </select>
           </label>
         </section>
-        <button class="btn-primary settings-save" onclick="saveSettings()">保存する</button>
-        <p class="settings-note">設定はこの端末にのみ保存されます</p>
+
+        <button class="btn-secondary settings-save" onclick="saveLocalSettings()">端末設定を保存</button>
+
+        <!-- ── 放送設定 ── -->
+        <div class="settings-group-label" style="margin-top:24px">📻 放送設定（自動生成の内容）</div>
+
+        <section class="settings-section">
+          <h3>スケジュール</h3>
+          <label class="toggle-label">
+            <span>毎日の自動生成</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="cfg-enabled" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </label>
+          <label>
+            <span>実行する曜日</span>
+            <div class="day-checks">
+              <label class="day-check"><input type="checkbox" value="mon" checked>月</label>
+              <label class="day-check"><input type="checkbox" value="tue" checked>火</label>
+              <label class="day-check"><input type="checkbox" value="wed" checked>水</label>
+              <label class="day-check"><input type="checkbox" value="thu" checked>木</label>
+              <label class="day-check"><input type="checkbox" value="fri" checked>金</label>
+              <label class="day-check"><input type="checkbox" value="sat" checked>土</label>
+              <label class="day-check"><input type="checkbox" value="sun" checked>日</label>
+            </div>
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <h3>ニュースの内容</h3>
+          <label>
+            <span>取り上げるカテゴリ</span>
+            <div class="cat-checks">
+              <label class="cat-check"><input type="checkbox" value="総合"      checked>総合</label>
+              <label class="cat-check"><input type="checkbox" value="政治"      checked>政治</label>
+              <label class="cat-check"><input type="checkbox" value="経済"      checked>経済</label>
+              <label class="cat-check"><input type="checkbox" value="国際"      checked>国際</label>
+              <label class="cat-check"><input type="checkbox" value="科学・文化" checked>科学</label>
+              <label class="cat-check"><input type="checkbox" value="テクノロジー" checked>テクノロジー</label>
+            </div>
+          </label>
+          <label>
+            <span>1放送あたりの最大ニュース件数</span>
+            <div class="range-row">
+              <input type="range" id="cfg-max-items" min="5" max="25" step="1" value="15" oninput="$('cfg-max-items-val').textContent=this.value+'件'">
+              <span id="cfg-max-items-val">15件</span>
+            </div>
+          </label>
+          <label>
+            <span>重視するキーワード <small>（カンマ区切り）</small></span>
+            <input type="text" id="cfg-focus" placeholder="例: AI, 日本株, 半導体">
+          </label>
+          <label>
+            <span>除外するキーワード <small>（カンマ区切り）</small></span>
+            <input type="text" id="cfg-exclude" placeholder="例: 芸能, 競馬">
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <h3>番組スタイル</h3>
+          <label>
+            <span>番組の長さ</span>
+            <select id="cfg-length">
+              <option value="short">短め（約3分）</option>
+              <option value="standard" selected>標準（約5分）</option>
+              <option value="long">詳しめ（約10分）</option>
+            </select>
+          </label>
+          <label>
+            <span>ナレーションのトーン</span>
+            <select id="cfg-tone">
+              <option value="casual" selected>カジュアル（親しみやすい）</option>
+              <option value="professional">プロフェッショナル（落ち着いた）</option>
+              <option value="cheerful">元気（明るい朝らしい）</option>
+            </select>
+          </label>
+          <label>
+            <span>オープニング定型文 <small>（任意）</small></span>
+            <textarea id="cfg-intro" rows="2" placeholder="例: おはようございます！今日も一日頑張りましょう。"></textarea>
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <h3>GitHub Personal Access Token</h3>
+          <label>
+            <span>トークン</span>
+            <div class="input-row">
+              <input id="setting-gh-token" type="password" placeholder="github_pat_..." autocomplete="off" spellcheck="false">
+              <button type="button" class="toggle-vis" onclick="toggleVis('setting-gh-token')">👁</button>
+            </div>
+            <small>放送設定の保存に必要です。GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens で作成。権限は「Contents: Read and write」のみでOK。</small>
+          </label>
+        </section>
+
+        <button class="btn-primary settings-save" id="save-broadcast-btn" onclick="saveBroadcastSettings()">放送設定を保存する</button>
+        <p class="settings-note" id="save-broadcast-status"></p>
+
       </div>
     </div>
 

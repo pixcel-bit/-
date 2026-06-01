@@ -1,0 +1,17 @@
+{
+  "schedule": {
+    "enabled": true,
+    "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+  },
+  "news": {
+    "categories": ["総合", "政治", "経済", "国際", "科学・文化", "テクノロジー"],
+    "max_items": 15,
+    "focus_keywords": [],
+    "exclude_keywords": []
+  },
+  "style": {
+    "length": "standard",
+    "tone": "casual",
+    "custom_intro": ""
+  }
+}

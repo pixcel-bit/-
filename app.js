@@ -36,6 +36,7 @@ function switchTab(name) {
     document.querySelector(`.tab-btn[data-tab="${t}"]`).classList.toggle('active', t === name);
   });
   if (name === 'archive') loadArchive();
+  if (name === 'settings') loadBroadcastConfig();
 }
 
 function $(id) { return document.getElementById(id); }
@@ -360,16 +361,159 @@ async function callClaude(systemPrompt, userMessage) {
   return data.content[0].text;
 }
 
-// ─── 設定 ────────────────────────────────────────────────────────────────
+// ─── 端末設定（localStorage） ────────────────────────────────────────────
 function populateSettings() {
-  $('setting-key').value   = S.apiKey;
-  $('setting-rate').value  = String(S.speechRate);
+  $('setting-key').value      = S.apiKey;
+  $('setting-rate').value     = String(S.speechRate);
+  $('setting-gh-token').value = localStorage.getItem('nr_gh_token') || '';
 }
 
-function saveSettings() {
+function saveLocalSettings() {
   S.apiKey     = $('setting-key').value.trim();
   S.speechRate = parseFloat($('setting-rate').value);
-  showToast('設定を保存しました ✓');
+  localStorage.setItem('nr_gh_token', $('setting-gh-token').value.trim());
+  showToast('端末設定を保存しました ✓');
+}
+
+// ─── 放送設定（data/config.json → GitHub API で保存） ────────────────────
+
+// URL から GitHub の owner/repo を取得
+function getGitHubInfo() {
+  const host = window.location.hostname;
+  if (!host.endsWith('.github.io')) return null;
+  const owner = host.replace('.github.io', '');
+  const parts  = window.location.pathname.split('/').filter(Boolean);
+  const repo   = parts[0] || owner;
+  return { owner, repo };
+}
+
+// data/config.json を読んで設定画面に反映
+async function loadBroadcastConfig() {
+  try {
+    const cfg = await fetchJSON(`data/config.json?t=${Date.now()}`);
+    applyConfigToForm(cfg);
+  } catch {
+    // 読み込み失敗時はデフォルト値のまま
+  }
+}
+
+function applyConfigToForm(cfg) {
+  $('cfg-enabled').checked = cfg.schedule?.enabled !== false;
+
+  // 曜日
+  document.querySelectorAll('.day-checks input[type=checkbox]').forEach(cb => {
+    cb.checked = (cfg.schedule?.days || []).includes(cb.value);
+  });
+
+  // カテゴリ
+  document.querySelectorAll('.cat-checks input[type=checkbox]').forEach(cb => {
+    cb.checked = (cfg.news?.categories || []).includes(cb.value);
+  });
+
+  // 件数
+  const max = cfg.news?.max_items ?? 15;
+  $('cfg-max-items').value = max;
+  $('cfg-max-items-val').textContent = max + '件';
+
+  // キーワード
+  $('cfg-focus').value   = (cfg.news?.focus_keywords   || []).join(', ');
+  $('cfg-exclude').value = (cfg.news?.exclude_keywords || []).join(', ');
+
+  // スタイル
+  $('cfg-length').value = cfg.style?.length || 'standard';
+  $('cfg-tone').value   = cfg.style?.tone   || 'casual';
+  $('cfg-intro').value  = cfg.style?.custom_intro || '';
+}
+
+function readConfigFromForm() {
+  const days = [...document.querySelectorAll('.day-checks input:checked')].map(cb => cb.value);
+  const cats = [...document.querySelectorAll('.cat-checks input:checked')].map(cb => cb.value);
+  const toArr = str => str.split(',').map(s => s.trim()).filter(Boolean);
+
+  return {
+    schedule: {
+      enabled: $('cfg-enabled').checked,
+      days,
+    },
+    news: {
+      categories:       cats,
+      max_items:        parseInt($('cfg-max-items').value, 10),
+      focus_keywords:   toArr($('cfg-focus').value),
+      exclude_keywords: toArr($('cfg-exclude').value),
+    },
+    style: {
+      length:       $('cfg-length').value,
+      tone:         $('cfg-tone').value,
+      custom_intro: $('cfg-intro').value.trim(),
+    },
+  };
+}
+
+async function saveBroadcastSettings() {
+  const token = localStorage.getItem('nr_gh_token') || '';
+  if (!token) {
+    showToast('GitHub トークンを入力してください');
+    return;
+  }
+
+  const ghInfo = getGitHubInfo();
+  if (!ghInfo) {
+    showToast('GitHub Pages 上でのみ保存できます');
+    return;
+  }
+
+  const btn    = $('save-broadcast-btn');
+  const status = $('save-broadcast-status');
+  btn.disabled = true;
+  status.textContent = '保存中...';
+
+  try {
+    const config = readConfigFromForm();
+    await pushConfigToGitHub(config, ghInfo, token);
+    status.textContent = '✓ 保存しました。次回の自動生成から反映されます。';
+    showToast('放送設定を保存しました ✓');
+  } catch (e) {
+    status.textContent = `⚠️ ${e.message}`;
+    showToast('保存に失敗しました');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function pushConfigToGitHub(config, { owner, repo }, token) {
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/data/config.json`;
+  const headers = {
+    'Authorization': `Bearer ${token}`,
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+
+  // 現在のファイルの SHA を取得
+  const getRes = await fetch(apiUrl, { headers });
+  if (!getRes.ok) {
+    const err = await getRes.json().catch(() => ({}));
+    throw new Error(err.message || `GitHub API エラー (${getRes.status})`);
+  }
+  const { sha } = await getRes.json();
+
+  // ファイルを更新
+  const content = encodeBase64Utf8(JSON.stringify(config, null, 2) + '\n');
+  const putRes  = await fetch(apiUrl, {
+    method: 'PUT',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: '⚙️ 放送設定を更新', content, sha }),
+  });
+
+  if (!putRes.ok) {
+    const err = await putRes.json().catch(() => ({}));
+    throw new Error(err.message || `保存失敗 (${putRes.status})`);
+  }
+}
+
+function encodeBase64Utf8(str) {
+  const bytes  = new TextEncoder().encode(str);
+  const binary = Array.from(bytes, b => String.fromCharCode(b)).join('');
+  return btoa(binary);
 }
 
 // ─── 音声プレイヤー（MP3用） ──────────────────────────────────────────────
