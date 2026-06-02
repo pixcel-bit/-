@@ -15,7 +15,7 @@ const S = {
 
   get settings() {
     return LS.getJSON('nr_settings', {
-      categories:       ['総合', '政治', '経済', '国際', '科学・文化', 'テクノロジー'],
+      categories:       ['主要', '社会', '政治', '経済', '国際', 'スポーツ', '科学・文化', 'テクノロジー'],
       customCategories: [],
       maxItems:         15,
       focusKeywords:    '',
@@ -50,11 +50,13 @@ const CORS_PROXIES = [
 ];
 
 const RSS_SOURCES = [
-  { url: 'https://www3.nhk.or.jp/rss/news/cat0.xml', source: 'NHK', category: '総合' },
-  { url: 'https://www3.nhk.or.jp/rss/news/cat1.xml', source: 'NHK', category: '政治' },
+  { url: 'https://www3.nhk.or.jp/rss/news/cat0.xml', source: 'NHK', category: '主要' },
+  { url: 'https://www3.nhk.or.jp/rss/news/cat1.xml', source: 'NHK', category: '社会' },
+  { url: 'https://www3.nhk.or.jp/rss/news/cat2.xml', source: 'NHK', category: '政治' },
   { url: 'https://www3.nhk.or.jp/rss/news/cat3.xml', source: 'NHK', category: '経済' },
-  { url: 'https://www3.nhk.or.jp/rss/news/cat5.xml', source: 'NHK', category: '国際' },
-  { url: 'https://www3.nhk.or.jp/rss/news/cat7.xml', source: 'NHK', category: '科学・文化' },
+  { url: 'https://www3.nhk.or.jp/rss/news/cat4.xml', source: 'NHK', category: '国際' },
+  { url: 'https://www3.nhk.or.jp/rss/news/cat5.xml', source: 'NHK', category: 'スポーツ' },
+  { url: 'https://www3.nhk.or.jp/rss/news/cat6.xml', source: 'NHK', category: '科学・文化' },
   { url: 'https://gigazine.net/news/rss_2.0/', source: 'Gigazine', category: 'テクノロジー' },
   { url: 'https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml', source: 'ITmedia', category: 'テクノロジー' },
 ];
