@@ -196,7 +196,26 @@ async function loadToday() {
       }
     }
 
-    items = items.slice(0, cfg.maxItems || 15);
+    // カテゴリ均等配分：各カテゴリから順番に1件ずつ選ぶ
+    const maxItems = cfg.maxItems || 15;
+    const byCategory = {};
+    for (const item of items) {
+      (byCategory[item.category] = byCategory[item.category] || []).push(item);
+    }
+    const cats = Object.keys(byCategory);
+    const balanced = [];
+    let added = true;
+    while (balanced.length < maxItems && added) {
+      added = false;
+      for (const cat of cats) {
+        if (balanced.length >= maxItems) break;
+        if (byCategory[cat].length) {
+          balanced.push(byCategory[cat].shift());
+          added = true;
+        }
+      }
+    }
+    items = balanced;
     if (!items.length) items = allItems.slice(0, 5);
 
     $('home-gen-msg').textContent = 'AIが放送原稿を作成中...';
