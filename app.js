@@ -161,14 +161,12 @@ function scoreItemByPrefs(item, prefs) {
 // クロスソースマップ：同じ話題を複数ソースが報じているか検出
 function buildCrossSourceMap(allItems) {
   const getWords = title => (title.match(/[一-鿿゠-ヿ]{2,}/g) || []);
-  // 単語 → アイテムリスト の逆引きインデックス
   const wordIndex = {};
   for (const item of allItems) {
     for (const w of getWords(item.title)) {
       (wordIndex[w] = wordIndex[w] || []).push(item);
     }
   }
-  // 各アイテムについて、別ソースで同話題を報じている数を数える
   const map = {};
   for (const item of allItems) {
     const otherSources = new Set();
@@ -182,6 +180,28 @@ function buildCrossSourceMap(allItems) {
     map[item.title] = otherSources.size;
   }
   return map;
+}
+
+// トピック重複排除用ストップワード（一般的すぎる語はトピック判定から除外）
+const TOPIC_STOP_WORDS = new Set([
+  '日本', '政府', '国内', '海外', '国際', '東京', '地域', '全国', '各地',
+  '問題', '影響', '対策', '方針', '発表', '開始', '実施', '決定', '予定',
+  '対応', '検討', '協議', '今年', '今月', '今後', '来年', '今週', '今日',
+  '首相', '大臣', '議員', '与党', '野党', '閣議', '内閣',
+  '可能', '必要', '重要', '最大', '最高', '最低', '増加', '減少',
+  '支援', '関係', '状況', '報告', '会議', '計画', '目標', '結果',
+]);
+
+function getTopicWords(title) {
+  return (title.match(/[一-鿿゠-ヿ]{2,}/g) || []).filter(w => !TOPIC_STOP_WORDS.has(w));
+}
+
+function hasTopicOverlap(title, covered) {
+  return getTopicWords(title).some(w => covered.has(w));
+}
+
+function markTopicCovered(title, covered) {
+  for (const w of getTopicWords(title)) covered.add(w);
 }
 
 // 記事の総合重要度スコア
@@ -342,7 +362,7 @@ async function loadToday() {
       }
     }
 
-    // ─── 重要度スコアで選定（カテゴリ多様性を保証）───
+    // ─── 重要度スコアで選定（カテゴリ多様性 + トピック重複排除）───
     const maxItems = cfg.maxItems || 15;
     const prefs = getPreferences();
     const crossSourceMap = buildCrossSourceMap(allItems);
@@ -352,21 +372,32 @@ async function loadToday() {
       .map(item => ({ ...item, _score: computeScore(item, prefs, crossSourceMap) }))
       .sort((a, b) => b._score - a._score);
 
-    // 第1パス：各カテゴリから最高スコアを1件ずつ確保（多様性保証）
     const selected = [];
     const usedCats = new Set();
+    const coveredTopics = new Set();
+
+    // 第1パス：各カテゴリから、トピック重複のない最高スコア記事を1件確保
     for (const item of scored) {
       if (selected.length >= maxItems) break;
-      if (!usedCats.has(item.category)) {
+      if (!usedCats.has(item.category) && !hasTopicOverlap(item.title, coveredTopics)) {
         selected.push(item);
         usedCats.add(item.category);
+        markTopicCovered(item.title, coveredTopics);
       }
     }
-    // 第2パス：残枠をスコア順で埋める
+    // 第2パス：残枠をスコア順で埋める（トピック重複は除外）
     for (const item of scored) {
       if (selected.length >= maxItems) break;
-      if (!selected.some(s => s.title === item.title)) {
+      if (!selected.some(s => s.title === item.title) && !hasTopicOverlap(item.title, coveredTopics)) {
         selected.push(item);
+        markTopicCovered(item.title, coveredTopics);
+      }
+    }
+    // 第3パス：件数が足りない場合はトピック重複も許容してフォールバック
+    if (selected.length < Math.min(5, maxItems)) {
+      for (const item of scored) {
+        if (selected.length >= maxItems) break;
+        if (!selected.some(s => s.title === item.title)) selected.push(item);
       }
     }
     items = selected;
