@@ -226,6 +226,17 @@
         <button class="btn-primary settings-save" onclick="saveSettings()">設定を保存する</button>
         <p class="settings-note">設定はこの端末にのみ保存されます。変更後は↺ボタンで今日の放送を再生成できます。</p>
 
+        <div class="settings-group-label" style="margin-top:24px">📡 ニュース収集</div>
+        <section class="settings-section">
+          <p class="collect-desc">毎日 <strong>06:00 JST</strong> に自動収集されます。<br>今すぐ取得したい場合は GitHub Actions から手動実行できます。</p>
+          <a class="btn-collect"
+             href="https://github.com/pixcel-bit/-/actions/workflows/daily-news.yml"
+             target="_blank" rel="noopener">
+            GitHub Actions で今すぐ実行 →
+          </a>
+          <small>リンク先で「Run workflow」ボタンを押してください。完了まで約30秒かかります。</small>
+        </section>
+
       </div>
     </div>
 
