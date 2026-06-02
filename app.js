@@ -168,7 +168,9 @@ ${intro}ルール:
 - です・ます調で自然な話し言葉
 - 難しい用語は噛み砕いて説明
 - 出力は原稿テキストのみ（見出し・箇条書き・記号・マークダウン不要）
-- 読み上げ時に自然に聞こえる文章`;
+- 数字は日本語の読みに合わせて表記（例: 2025年→二〇二五年、1兆円→一兆円）
+- 英語略語は初出時にカナ読みを添える（例: AI（エーアイ）、GDP（ジーディーピー））
+- 文末は必ず「。」で終わらせ、読み上げ時に自然な間が取れるようにする`;
 
   const newsText = items.map((n, i) => `${i + 1}. 【${n.category}】${n.title}\n${n.summary || ''}`).join('\n\n');
 
@@ -263,11 +265,14 @@ function speakMainChunk() {
   $('tts-progress-fill').style.width = pct + '%';
   $('main-chunk-info').textContent   = `${mainChunkIdx + 1} / ${mainChunks.length}`;
 
-  const utt  = new SpeechSynthesisUtterance(mainChunks[mainChunkIdx]);
-  utt.lang   = 'ja-JP';
-  utt.rate   = mainSpeed;
-  utt.onend  = () => { if (mainSpeaking) { mainChunkIdx++; speakMainChunk(); } };
-  utt.onerror = () => { if (mainSpeaking) { mainChunkIdx++; speakMainChunk(); } };
+  const utt   = new SpeechSynthesisUtterance(mainChunks[mainChunkIdx]);
+  utt.lang    = 'ja-JP';
+  utt.rate    = mainSpeed;
+  const voice = resolveVoice(S.settings.voiceName);
+  if (voice) utt.voice = voice;
+  const next  = () => { if (mainSpeaking) { mainChunkIdx++; setTimeout(speakMainChunk, 150); } };
+  utt.onend   = next;
+  utt.onerror = next;
   window.speechSynthesis.speak(utt);
 }
 
@@ -335,8 +340,13 @@ async function loadDateBroadcast(date) {
 const CHAT_SYSTEM = `あなたはプロのラジオパーソナリティです。
 ユーザーのリクエストに応じて、ニュース原稿を作成してください。
 提供されたニュース情報を参考に、3〜5分で読める自然な話し言葉のラジオ原稿を書いてください。
-です・ます調で、難しい用語は噛み砕いて説明してください。
-出力は原稿テキストのみ（見出し・説明文・記号不要）。`;
+ルール:
+- です・ます調で自然な話し言葉
+- 難しい用語は噛み砕いて説明
+- 出力は原稿テキストのみ（見出し・説明文・記号・マークダウン不要）
+- 数字は日本語の読みに合わせて表記（例: 2025年→二〇二五年、1兆円→一兆円）
+- 英語略語は初出時にカナ読みを添える（例: AI（エーアイ））
+- 文末は必ず「。」で終わらせる`;
 
 let chatSpeaking    = false;
 let currentChatBtn  = null;
@@ -463,7 +473,9 @@ function toggleChatSpeak(btn, script) {
   btn.textContent = '⏸ 停止';
 
   const chunks = script.match(/[^。！？\n]+[。！？\n]?/g) || [script];
-  const rate   = parseFloat(S.settings.speechRate || 1.0);
+  const cfg    = S.settings;
+  const rate   = parseFloat(cfg.speechRate || 1.0);
+  const voice  = resolveVoice(cfg.voiceName);
   let i = 0;
 
   (function speakNext() {
@@ -475,8 +487,9 @@ function toggleChatSpeak(btn, script) {
     const utt   = new SpeechSynthesisUtterance(chunks[i]);
     utt.lang    = 'ja-JP';
     utt.rate    = rate;
-    utt.onend   = () => { i++; speakNext(); };
-    utt.onerror = () => { i++; speakNext(); };
+    if (voice) utt.voice = voice;
+    utt.onend   = () => { i++; setTimeout(speakNext, 150); };
+    utt.onerror = () => { i++; setTimeout(speakNext, 150); };
     window.speechSynthesis.speak(utt);
   })();
 }
@@ -505,6 +518,8 @@ function populateSettings() {
   $('setting-tone').value    = cfg.tone            || 'casual';
   $('setting-rate').value    = String(cfg.speechRate ?? 1.0);
   $('setting-intro').value   = cfg.customIntro     || '';
+  populateVoiceSelector();
+  if (cfg.voiceName) $('setting-voice').value = cfg.voiceName;
 }
 
 function saveSettings() {
@@ -520,6 +535,7 @@ function saveSettings() {
     tone:            $('setting-tone').value,
     speechRate:      parseFloat($('setting-rate').value),
     customIntro:     $('setting-intro').value.trim(),
+    voiceName:       $('setting-voice').value,
   });
 
   showToast('設定を保存しました ✓');
@@ -553,6 +569,11 @@ async function callClaude(system, userMsg) {
 }
 
 // ─── ユーティリティ ───────────────────────────────────────────────────────
+function resolveVoice(name) {
+  if (!name) return null;
+  return speechSynthesis.getVoices().find(v => v.name === name) || null;
+}
+
 function toggleVis(id) {
   const el = $(id);
   el.type = el.type === 'password' ? 'text' : 'password';
@@ -591,6 +612,32 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ─── 音声リスト ───────────────────────────────────────────────────────────
+function populateVoiceSelector() {
+  const sel = $('setting-voice');
+  if (!sel) return;
+  const voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('ja'));
+  if (!voices.length) return;
+
+  // 既存オプションを保持しつつ重複追加を防ぐ
+  sel.innerHTML = '<option value="">システムデフォルト</option>';
+  voices.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value       = v.name;
+    opt.textContent = v.name + (v.localService ? '' : ' 〔オンライン〕');
+    sel.appendChild(opt);
+  });
+
+  const saved = S.settings.voiceName || '';
+  if (saved) sel.value = saved;
+}
+
+// Chrome系はvoiceschangedイベント待ち、Safari系は同期で取得可
+if (typeof speechSynthesis !== 'undefined') {
+  speechSynthesis.addEventListener('voiceschanged', populateVoiceSelector);
+  populateVoiceSelector();
 }
 
 // ─── 起動 ─────────────────────────────────────────────────────────────────
