@@ -1,37 +1,33 @@
-name: 毎日ニュースラジオ生成
+name: 毎日ニュース取得
 
 on:
   schedule:
     - cron: '0 21 * * *'   # 毎日 06:00 JST (= 21:00 UTC)
-  workflow_dispatch:        # GitHub画面から手動実行も可能
+  workflow_dispatch:        # GitHub 画面から手動実行も可能
 
 jobs:
-  generate:
+  fetch:
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: チェックアウト
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Python セットアップ
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: 依存関係インストール
         run: pip install -r scripts/requirements.txt
 
-      - name: ニュース生成
+      - name: RSS ニュース取得
         run: python scripts/generate.py
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: 変更をコミット & プッシュ
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add data/ audio/
-          git diff --staged --quiet || git commit -m "📻 $(date -u +%Y-%m-%d) のニュースラジオを生成"
+          git add data/
+          git diff --staged --quiet || git commit -m "📰 $(date -u +%Y-%m-%d) のニュースを取得"
           git push

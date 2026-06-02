@@ -449,18 +449,20 @@ details[open] .news-detail summary::before,
 }
 
 .play-btn-sm {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
   background: var(--accent);
   color: white;
   border: none;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  white-space: nowrap;
 }
 
 /* Chat input */
@@ -756,6 +758,24 @@ details[open] .news-detail summary::before,
   white-space: nowrap;
 }
 .toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ── TTS プログレスバー ── */
+.tts-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.tts-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s linear;
+}
 
 /* chat-script-detail & tts-note */
 .chat-script-detail {

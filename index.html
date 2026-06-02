@@ -24,16 +24,16 @@
         <p>AIが届ける、毎朝のニュースラジオ</p>
       </div>
       <div class="onboarding-form">
-        <p class="onboarding-desc">チャット機能を使うには Anthropic の API キーが必要です。毎日の自動放送はキーなしでも聴けます。</p>
         <label>
-          <span>Anthropic API キー（任意）</span>
+          <span>Anthropic API キー</span>
           <div class="input-row">
-            <input id="onboarding-key" type="password" placeholder="sk-ant-... （あとで設定画面から入力も可）" autocomplete="off" spellcheck="false">
+            <input id="onboarding-key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
             <button type="button" class="toggle-vis" onclick="toggleVis('onboarding-key')">👁</button>
           </div>
-          <small>キーはこの端末にのみ保存されます。サーバーには送信されません。</small>
+          <small>ニュース生成に使います。このキーはあなたの端末にのみ保存され、サーバーには送信されません。</small>
         </label>
         <button class="btn-primary" onclick="onboardingSubmit()">はじめる</button>
+        <p class="onboarding-hint">APIキーは <strong>console.anthropic.com</strong> で取得できます</p>
       </div>
     </div>
   </div>
@@ -46,41 +46,40 @@
       <div class="page-header">
         <span class="header-logo">📻</span>
         <h2>Daily News Radio</h2>
-        <button class="icon-btn" onclick="refreshToday()" title="更新">↺</button>
+        <button class="icon-btn" onclick="regenerateToday()" title="再生成">↺</button>
       </div>
 
-      <div id="home-loading" class="status-card"><div class="spinner"></div><p>読み込み中...</p></div>
+      <div id="home-loading"    class="status-card"><div class="spinner"></div><p>読み込み中...</p></div>
       <div id="home-generating" class="status-card" style="display:none">
         <div class="spinner"></div>
-        <p>今日のニュースを準備中です</p>
-        <p class="sub">毎朝6時に自動生成されます</p>
+        <p id="home-gen-msg">今日のニュースを取得中...</p>
+        <p class="sub">Claude が個人設定に合わせて原稿を生成します</p>
       </div>
       <div id="home-error" class="status-card error" style="display:none">
         <div class="error-icon">⚠️</div>
         <p id="home-error-msg"></p>
-        <button class="btn-secondary" onclick="refreshToday()">再読み込み</button>
+        <button class="btn-secondary" onclick="loadToday()">再試行</button>
       </div>
       <div id="home-player" style="display:none">
         <div class="player-card">
           <div class="player-date" id="player-date"></div>
           <div class="player-count" id="player-count"></div>
           <div class="player-controls">
-            <audio id="main-audio" preload="none"></audio>
-            <button class="play-btn" id="play-btn" onclick="togglePlay('main-audio','play-btn')">▶</button>
+            <button class="play-btn" id="play-btn" onclick="toggleMainSpeak()">▶</button>
             <div class="progress-wrap">
-              <input type="range" id="main-seek" class="seek-bar" value="0" min="0" step="0.1" oninput="seekAudio('main-audio','main-seek')">
+              <div class="tts-progress-bar"><div id="tts-progress-fill" class="tts-progress-fill"></div></div>
               <div class="time-row">
-                <span id="main-current">0:00</span>
-                <span id="main-duration">–:––</span>
+                <span id="main-chunk-info">タップして再生</span>
+                <span id="main-duration"></span>
               </div>
             </div>
           </div>
           <div class="speed-row">
             <span class="speed-label">速度</span>
-            <button class="speed-btn" onclick="setSpeed('main-audio',0.8,this)">0.8x</button>
-            <button class="speed-btn active" onclick="setSpeed('main-audio',1.0,this)">1.0x</button>
-            <button class="speed-btn" onclick="setSpeed('main-audio',1.2,this)">1.2x</button>
-            <button class="speed-btn" onclick="setSpeed('main-audio',1.5,this)">1.5x</button>
+            <button class="speed-btn" onclick="setMainSpeed(0.8,this)">0.8x</button>
+            <button class="speed-btn active" onclick="setMainSpeed(1.0,this)">1.0x</button>
+            <button class="speed-btn" onclick="setMainSpeed(1.2,this)">1.2x</button>
+            <button class="speed-btn" onclick="setMainSpeed(1.5,this)">1.5x</button>
           </div>
         </div>
         <details class="news-detail">
@@ -94,8 +93,8 @@
       </div>
       <div id="home-empty" class="status-card" style="display:none">
         <div class="empty-icon">📡</div>
-        <p>今日の放送はまだ準備中です</p>
-        <p class="sub">毎朝6時に自動生成されます</p>
+        <p>今日のニュースはまだ準備中です</p>
+        <p class="sub">毎朝6時に自動取得されます</p>
       </div>
     </div>
 
@@ -130,89 +129,48 @@
       <div class="page-header"><h2>設定</h2></div>
       <div class="settings-body">
 
-        <!-- ── 端末設定 ── -->
-        <div class="settings-group-label">📱 端末の設定</div>
-
+        <div class="settings-group-label">🔑 API キー</div>
         <section class="settings-section">
-          <h3>チャット機能用 API キー</h3>
           <label>
-            <span>Anthropic API キー</span>
+            <span>Anthropic API キー <span class="required">必須</span></span>
             <div class="input-row">
               <input id="setting-key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
               <button type="button" class="toggle-vis" onclick="toggleVis('setting-key')">👁</button>
             </div>
-            <small>チャット機能で使います。毎日の自動放送には不要です。</small>
+            <small>この端末にのみ保存。サーバーには送信されません。</small>
           </label>
         </section>
 
+        <div class="settings-group-label" style="margin-top:20px">📻 毎日の放送設定</div>
         <section class="settings-section">
-          <h3>チャットの読み上げ速度</h3>
-          <label>
-            <span>速度</span>
-            <select id="setting-rate">
-              <option value="0.8">ゆっくり (0.8x)</option>
-              <option value="1.0" selected>普通 (1.0x)</option>
-              <option value="1.2">少し速い (1.2x)</option>
-              <option value="1.5">速い (1.5x)</option>
-            </select>
-          </label>
-        </section>
-
-        <button class="btn-secondary settings-save" onclick="saveLocalSettings()">端末設定を保存</button>
-
-        <!-- ── 放送設定 ── -->
-        <div class="settings-group-label" style="margin-top:24px">📻 放送設定（自動生成の内容）</div>
-
-        <section class="settings-section">
-          <h3>スケジュール</h3>
-          <label class="toggle-label">
-            <span>毎日の自動生成</span>
-            <label class="toggle-switch">
-              <input type="checkbox" id="cfg-enabled" checked>
-              <span class="toggle-slider"></span>
-            </label>
-          </label>
-          <label>
-            <span>実行する曜日</span>
-            <div class="day-checks">
-              <label class="day-check"><input type="checkbox" value="mon" checked>月</label>
-              <label class="day-check"><input type="checkbox" value="tue" checked>火</label>
-              <label class="day-check"><input type="checkbox" value="wed" checked>水</label>
-              <label class="day-check"><input type="checkbox" value="thu" checked>木</label>
-              <label class="day-check"><input type="checkbox" value="fri" checked>金</label>
-              <label class="day-check"><input type="checkbox" value="sat" checked>土</label>
-              <label class="day-check"><input type="checkbox" value="sun" checked>日</label>
-            </div>
-          </label>
+          <h3>取り上げるカテゴリ</h3>
+          <div class="cat-checks">
+            <label class="cat-check"><input type="checkbox" value="総合"       >総合</label>
+            <label class="cat-check"><input type="checkbox" value="政治"       >政治</label>
+            <label class="cat-check"><input type="checkbox" value="経済"       >経済</label>
+            <label class="cat-check"><input type="checkbox" value="国際"       >国際</label>
+            <label class="cat-check"><input type="checkbox" value="科学・文化" >科学</label>
+            <label class="cat-check"><input type="checkbox" value="テクノロジー">テクノロジー</label>
+          </div>
         </section>
 
         <section class="settings-section">
-          <h3>ニュースの内容</h3>
+          <h3>ニュースの絞り込み</h3>
           <label>
-            <span>取り上げるカテゴリ</span>
-            <div class="cat-checks">
-              <label class="cat-check"><input type="checkbox" value="総合"      checked>総合</label>
-              <label class="cat-check"><input type="checkbox" value="政治"      checked>政治</label>
-              <label class="cat-check"><input type="checkbox" value="経済"      checked>経済</label>
-              <label class="cat-check"><input type="checkbox" value="国際"      checked>国際</label>
-              <label class="cat-check"><input type="checkbox" value="科学・文化" checked>科学</label>
-              <label class="cat-check"><input type="checkbox" value="テクノロジー" checked>テクノロジー</label>
-            </div>
-          </label>
-          <label>
-            <span>1放送あたりの最大ニュース件数</span>
+            <span>最大ニュース件数</span>
             <div class="range-row">
-              <input type="range" id="cfg-max-items" min="5" max="25" step="1" value="15" oninput="$('cfg-max-items-val').textContent=this.value+'件'">
-              <span id="cfg-max-items-val">15件</span>
+              <input type="range" id="setting-max" min="5" max="25" step="1" value="15"
+                     oninput="$('setting-max-val').textContent=this.value+'件'">
+              <span id="setting-max-val">15件</span>
             </div>
           </label>
           <label>
             <span>重視するキーワード <small>（カンマ区切り）</small></span>
-            <input type="text" id="cfg-focus" placeholder="例: AI, 日本株, 半導体">
+            <input type="text" id="setting-focus" placeholder="例: AI, 日本株, 半導体">
           </label>
           <label>
             <span>除外するキーワード <small>（カンマ区切り）</small></span>
-            <input type="text" id="cfg-exclude" placeholder="例: 芸能, 競馬">
+            <input type="text" id="setting-exclude" placeholder="例: 芸能, 競馬">
           </label>
         </section>
 
@@ -220,7 +178,7 @@
           <h3>番組スタイル</h3>
           <label>
             <span>番組の長さ</span>
-            <select id="cfg-length">
+            <select id="setting-length">
               <option value="short">短め（約3分）</option>
               <option value="standard" selected>標準（約5分）</option>
               <option value="long">詳しめ（約10分）</option>
@@ -228,43 +186,48 @@
           </label>
           <label>
             <span>ナレーションのトーン</span>
-            <select id="cfg-tone">
+            <select id="setting-tone">
               <option value="casual" selected>カジュアル（親しみやすい）</option>
               <option value="professional">プロフェッショナル（落ち着いた）</option>
               <option value="cheerful">元気（明るい朝らしい）</option>
             </select>
           </label>
           <label>
-            <span>オープニング定型文 <small>（任意）</small></span>
-            <textarea id="cfg-intro" rows="2" placeholder="例: おはようございます！今日も一日頑張りましょう。"></textarea>
+            <span>読み上げ速度</span>
+            <select id="setting-rate">
+              <option value="0.8">ゆっくり (0.8x)</option>
+              <option value="1.0" selected>普通 (1.0x)</option>
+              <option value="1.2">少し速い (1.2x)</option>
+              <option value="1.5">速い (1.5x)</option>
+            </select>
           </label>
-        </section>
-
-        <section class="settings-section">
-          <h3>GitHub Personal Access Token</h3>
           <label>
-            <span>トークン</span>
-            <div class="input-row">
-              <input id="setting-gh-token" type="password" placeholder="github_pat_..." autocomplete="off" spellcheck="false">
-              <button type="button" class="toggle-vis" onclick="toggleVis('setting-gh-token')">👁</button>
-            </div>
-            <small>放送設定の保存に必要です。GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens で作成。権限は「Contents: Read and write」のみでOK。</small>
+            <span>読み上げの声 <small>（端末依存）</small></span>
+            <select id="setting-voice">
+              <option value="">システムデフォルト</option>
+            </select>
+            <small>iOSは「O-Ren」が最も自然です</small>
+          </label>
+          <label>
+            <span>オープニング定型文 <small>（任意）</small></span>
+            <textarea id="setting-intro" rows="2" placeholder="例: おはようございます！今日も一日頑張りましょう。"></textarea>
           </label>
         </section>
 
-        <button class="btn-primary settings-save" id="save-broadcast-btn" onclick="saveBroadcastSettings()">放送設定を保存する</button>
-        <p class="settings-note" id="save-broadcast-status"></p>
+        <button class="btn-primary settings-save" onclick="saveSettings()">設定を保存する</button>
+        <p class="settings-note">設定はこの端末にのみ保存されます。変更後は↺ボタンで今日の放送を再生成できます。</p>
 
       </div>
     </div>
 
     <nav class="tab-bar">
-      <button class="tab-btn active" data-tab="home"    onclick="switchTab('home')"><span class="tab-icon">🏠</span><span>ホーム</span></button>
-      <button class="tab-btn"        data-tab="chat"    onclick="switchTab('chat')"><span class="tab-icon">💬</span><span>チャット</span></button>
-      <button class="tab-btn"        data-tab="archive" onclick="switchTab('archive')"><span class="tab-icon">📋</span><span>履歴</span></button>
+      <button class="tab-btn active" data-tab="home"     onclick="switchTab('home')"><span class="tab-icon">🏠</span><span>ホーム</span></button>
+      <button class="tab-btn"        data-tab="chat"     onclick="switchTab('chat')"><span class="tab-icon">💬</span><span>チャット</span></button>
+      <button class="tab-btn"        data-tab="archive"  onclick="switchTab('archive')"><span class="tab-icon">📋</span><span>履歴</span></button>
       <button class="tab-btn"        data-tab="settings" onclick="switchTab('settings')"><span class="tab-icon">⚙️</span><span>設定</span></button>
     </nav>
   </div>
+
 </div>
 <script src="app.js"></script>
 </body>

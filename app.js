@@ -1,24 +1,48 @@
-// ─── 設定（localStorage に永続保存） ───────────────────────────────────────
-const S = {
-  get apiKey()   { return localStorage.getItem('nr_api_key')   || ''; },
-  get speechRate(){ return parseFloat(localStorage.getItem('nr_rate') || '1.0'); },
-  set apiKey(v)  { localStorage.setItem('nr_api_key', v); },
-  set speechRate(v){ localStorage.setItem('nr_rate', String(v)); },
-  get hasSeenOnboarding() { return !!localStorage.getItem('nr_onboarded'); },
-  markOnboarded() { localStorage.setItem('nr_onboarded', '1'); },
+// ─── localStorage ヘルパー ────────────────────────────────────────────────
+const LS = {
+  get:     (k, d = '')   => localStorage.getItem(k) ?? d,
+  set:     (k, v)        => localStorage.setItem(k, v),
+  getJSON: (k, d = null) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  setJSON: (k, v)        => localStorage.setItem(k, JSON.stringify(v)),
+  del:     (k)           => localStorage.removeItem(k),
 };
+
+const S = {
+  get apiKey()        { return LS.get('nr_api_key'); },
+  set apiKey(v)       { LS.set('nr_api_key', v); },
+  get hasOnboarded()  { return !!LS.get('nr_onboarded'); },
+  markOnboarded()     { LS.set('nr_onboarded', '1'); },
+
+  get settings() {
+    return LS.getJSON('nr_settings', {
+      categories:      ['総合'],
+      maxItems:        15,
+      focusKeywords:   '',
+      excludeKeywords: '',
+      length:          'standard',
+      tone:            'casual',
+      speechRate:      1.0,
+      customIntro:     '',
+    });
+  },
+  saveSettings(cfg) { LS.setJSON('nr_settings', cfg); },
+
+  getCachedBroadcast(date) { return LS.getJSON(`nr_broadcast_${date}`); },
+  setCachedBroadcast(date, data) { LS.setJSON(`nr_broadcast_${date}`, data); },
+  delCachedBroadcast(date) { LS.del(`nr_broadcast_${date}`); },
+};
+
+function $(id) { return document.getElementById(id); }
 
 // ─── 起動 ─────────────────────────────────────────────────────────────────
 async function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
-
-  if (!S.hasSeenOnboarding) {
+  if (!S.hasOnboarded) {
     showScreen('onboarding');
     return;
   }
-
   showScreen('main');
   populateSettings();
   await loadToday();
@@ -31,15 +55,12 @@ function showScreen(name) {
 }
 
 function switchTab(name) {
-  ['home','chat','archive','settings'].forEach(t => {
+  ['home', 'chat', 'archive', 'settings'].forEach(t => {
     $(`tab-${t}`).style.display = t === name ? '' : 'none';
     document.querySelector(`.tab-btn[data-tab="${t}"]`).classList.toggle('active', t === name);
   });
   if (name === 'archive') loadArchive();
-  if (name === 'settings') loadBroadcastConfig();
 }
-
-function $(id) { return document.getElementById(id); }
 
 // ─── オンボーディング ─────────────────────────────────────────────────────
 function onboardingSubmit() {
@@ -51,83 +72,225 @@ function onboardingSubmit() {
   loadToday();
 }
 
-// ─── 今日の放送（data/YYYY-MM-DD.json を読む） ────────────────────────────
+// ─── 今日の放送 ───────────────────────────────────────────────────────────
 async function loadToday() {
   setHomeState('loading');
   const today = todayStr();
+
+  const cached = S.getCachedBroadcast(today);
+  if (cached) { showPlayer(cached); return; }
+
   try {
-    const data = await fetchJSON(`data/${today}.json`);
-    showPlayer(data);
-  } catch (e) {
-    // 今日分がなければ昨日を表示 + "準備中" バナー
+    const newsData = await fetchJSON(`data/${today}-news.json`);
+    await generateAndShowBroadcast(newsData, today, false);
+  } catch {
+    // 今日分がなければ昨日を表示
     try {
       const yesterday = offsetDate(-1);
-      const data = await fetchJSON(`data/${yesterday}.json`);
-      showPlayer(data, true); // true = show "today generating" notice
+      const cachedY = S.getCachedBroadcast(yesterday);
+      if (cachedY) { showPlayer(cachedY, true); return; }
+      const newsData = await fetchJSON(`data/${yesterday}-news.json`);
+      await generateAndShowBroadcast(newsData, yesterday, true);
     } catch {
       setHomeState('empty');
     }
   }
 }
 
-async function refreshToday() {
-  setHomeState('loading');
-  // キャッシュをバイパスして再取得
+async function regenerateToday() {
+  stopMainSpeak();
+  S.delCachedBroadcast(todayStr());
+  await loadToday();
+}
+
+async function generateAndShowBroadcast(newsData, date, isYesterday) {
+  if (!S.apiKey) {
+    setHomeState('error');
+    $('home-error-msg').textContent = 'APIキーが設定されていません。設定画面から入力してください。';
+    return;
+  }
+
+  setHomeState('generating');
+
   try {
-    const data = await fetchJSON(`data/${todayStr()}.json?t=${Date.now()}`);
-    showPlayer(data);
-  } catch {
-    await loadToday();
+    const cfg = S.settings;
+
+    let items = newsData.news_items || [];
+
+    // カテゴリフィルタ
+    if (cfg.categories && cfg.categories.length > 0) {
+      const filtered = items.filter(n => cfg.categories.includes(n.category));
+      if (filtered.length > 0) items = filtered;
+    }
+
+    // 除外キーワード
+    if (cfg.excludeKeywords) {
+      const excl = cfg.excludeKeywords.split(',').map(s => s.trim()).filter(Boolean);
+      if (excl.length) items = items.filter(n => !excl.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
+    }
+
+    // 優先キーワード（先頭へ）
+    if (cfg.focusKeywords) {
+      const focus = cfg.focusKeywords.split(',').map(s => s.trim()).filter(Boolean);
+      if (focus.length) {
+        const hi  = items.filter(n =>  focus.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
+        const lo  = items.filter(n => !focus.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
+        items = [...hi, ...lo];
+      }
+    }
+
+    items = items.slice(0, cfg.maxItems || 15);
+    if (!items.length) items = (newsData.news_items || []).slice(0, 5);
+
+    $('home-gen-msg').textContent = 'AIが放送原稿を作成中...';
+
+    const script = await generateScript(items, cfg);
+
+    const broadcast = { date, news_items: items, script, generated_at: new Date().toISOString() };
+    S.setCachedBroadcast(date, broadcast);
+    showPlayer(broadcast, isYesterday);
+  } catch (e) {
+    setHomeState('error');
+    $('home-error-msg').textContent = e.message;
   }
 }
 
+async function generateScript(items, cfg) {
+  const lengthMap = { short: '約3分（400字程度）', standard: '約5分（800字程度）', long: '約10分（1600字程度）' };
+  const toneMap   = { casual: 'カジュアルで親しみやすい', professional: '落ち着いたプロフェッショナルな', cheerful: '元気で明るい朝らしい' };
+
+  const intro = cfg.customIntro ? `冒頭に必ず次の文を入れてください: 「${cfg.customIntro}」\n\n` : '';
+
+  const system = `あなたはプロのラジオパーソナリティです。
+以下のニュース情報をもとに、${lengthMap[cfg.length] || lengthMap.standard}のラジオ放送原稿を作成してください。
+トーンは${toneMap[cfg.tone] || toneMap.casual}口調です。
+${intro}ルール:
+- です・ます調で自然な話し言葉
+- 難しい用語は噛み砕いて説明
+- 出力は原稿テキストのみ（見出し・箇条書き・記号・マークダウン不要）
+- 数字は日本語の読みに合わせて表記（例: 2025年→二〇二五年、1兆円→一兆円）
+- 英語略語は初出時にカナ読みを添える（例: AI（エーアイ）、GDP（ジーディーピー））
+- 文末は必ず「。」で終わらせ、読み上げ時に自然な間が取れるようにする`;
+
+  const newsText = items.map((n, i) => `${i + 1}. 【${n.category}】${n.title}\n${n.summary || ''}`).join('\n\n');
+
+  return callClaude(system, `今日のニュース一覧:\n${newsText}`);
+}
+
 function setHomeState(state) {
-  ['loading','generating','error','player','empty'].forEach(s => {
+  ['loading', 'generating', 'error', 'player', 'empty'].forEach(s => {
     const el = $(`home-${s}`);
     if (el) el.style.display = s === state ? '' : 'none';
   });
 }
 
-function showPlayer(data, isYesterday = false) {
+// ─── メインプレイヤー（speechSynthesis） ──────────────────────────────────
+let mainChunks   = [];
+let mainChunkIdx = 0;
+let mainSpeaking = false;
+let mainSpeed    = 1.0;
+
+function showPlayer(broadcast, isYesterday = false) {
   setHomeState('player');
 
-  const d = new Date(data.date + 'T00:00:00');
-  $('player-date').textContent = d.toLocaleDateString('ja-JP', {
-    year: 'numeric', month: 'long', day: 'numeric', weekday: 'short',
-  }) + (isYesterday ? '　（昨日）' : '');
-  $('player-count').textContent = `${data.news_count}件のニュース`;
-  $('home-script').textContent  = data.script || '';
+  const d = new Date(broadcast.date + 'T00:00:00');
+  $('player-date').textContent  = d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' }) + (isYesterday ? '　（昨日）' : '');
+  $('player-count').textContent = `${(broadcast.news_items || []).length}件のニュース`;
+  $('home-script').textContent  = broadcast.script || '';
 
-  if (isYesterday) {
-    const notice = document.createElement('div');
-    notice.className = 'status-card';
-    notice.style.marginTop = '8px';
-    notice.innerHTML = '<p class="sub">📡 今日のニュースは準備中です。6時以降に自動生成されます。</p>';
-    $('home-player').prepend(notice);
-  }
+  // 速度ボタン状態を設定
+  mainSpeed = parseFloat(S.settings.speechRate || 1.0);
+  document.querySelectorAll('.speed-row .speed-btn').forEach(btn => {
+    btn.classList.toggle('active', parseFloat(btn.textContent) === mainSpeed);
+  });
 
-  const audio = $('main-audio');
-  if (data.audio_file) {
-    // GitHub Pages の場合はリポジトリルートからの相対パスで取得
-    audio.src = data.audio_file;
-    audio.load();
-    bindAudioEvents(audio, 'main-seek', 'main-current', 'main-duration', 'play-btn');
-  }
+  // 原稿をチャンクに分割
+  const script = broadcast.script || '';
+  mainChunks   = script.match(/[^。！？\n]+[。！？\n]?/g) || (script ? [script] : []);
+  mainChunkIdx = 0;
+  mainSpeaking = false;
 
+  $('play-btn').textContent          = '▶';
+  $('tts-progress-fill').style.width = '0%';
+  $('main-chunk-info').textContent   = 'タップして再生';
+  $('main-duration').textContent     = `全${mainChunks.length}文`;
+
+  // ニュース一覧
   const list = $('home-news-list');
   list.innerHTML = '';
-  (data.news_items || []).forEach(item => {
-    const li = document.createElement('li');
+  (broadcast.news_items || []).forEach(item => {
+    const li  = document.createElement('li');
     li.className = 'news-item';
     li.innerHTML = `
       <div class="news-item-meta">
-        <span class="news-cat">${item.category}</span>
-        <span class="news-src">${item.source}</span>
+        <span class="news-cat">${escHtml(item.category || '')}</span>
+        <span class="news-src">${escHtml(item.source || '')}</span>
       </div>
-      <div class="news-title"><a href="${item.url}" target="_blank" rel="noopener">${item.title}</a></div>
-      <div class="news-summary">${item.summary}</div>`;
+      <div class="news-title"><a href="${escHtml(item.url || '#')}" target="_blank" rel="noopener">${escHtml(item.title || '')}</a></div>
+      <div class="news-summary">${escHtml(item.summary || '')}</div>`;
     list.appendChild(li);
   });
+}
+
+function toggleMainSpeak() {
+  if (mainSpeaking) {
+    stopMainSpeak();
+  } else {
+    if (mainChunkIdx >= mainChunks.length) mainChunkIdx = 0;
+    startMainSpeak();
+  }
+}
+
+function startMainSpeak() {
+  if (!window.speechSynthesis || mainChunks.length === 0) {
+    showToast('このブラウザは読み上げに対応していません');
+    return;
+  }
+  mainSpeaking = true;
+  $('play-btn').textContent = '⏸';
+  speakMainChunk();
+}
+
+function speakMainChunk() {
+  if (!mainSpeaking || mainChunkIdx >= mainChunks.length) {
+    mainSpeaking = false;
+    $('play-btn').textContent          = '▶';
+    $('main-chunk-info').textContent   = mainChunkIdx >= mainChunks.length ? '再生完了' : 'タップして再生';
+    $('tts-progress-fill').style.width = mainChunkIdx >= mainChunks.length ? '100%' : '0%';
+    if (mainChunkIdx >= mainChunks.length) mainChunkIdx = 0;
+    return;
+  }
+
+  const pct = mainChunks.length ? (mainChunkIdx / mainChunks.length) * 100 : 0;
+  $('tts-progress-fill').style.width = pct + '%';
+  $('main-chunk-info').textContent   = `${mainChunkIdx + 1} / ${mainChunks.length}`;
+
+  const utt   = new SpeechSynthesisUtterance(mainChunks[mainChunkIdx]);
+  utt.lang    = 'ja-JP';
+  utt.rate    = mainSpeed;
+  const voice = resolveVoice(S.settings.voiceName);
+  if (voice) utt.voice = voice;
+  const next  = () => { if (mainSpeaking) { mainChunkIdx++; setTimeout(speakMainChunk, 150); } };
+  utt.onend   = next;
+  utt.onerror = next;
+  window.speechSynthesis.speak(utt);
+}
+
+function stopMainSpeak() {
+  mainSpeaking = false;
+  window.speechSynthesis.cancel();
+  const btn = $('play-btn');
+  if (btn) btn.textContent = '▶';
+}
+
+function setMainSpeed(rate, btn) {
+  mainSpeed = rate;
+  btn.closest('.speed-row').querySelectorAll('.speed-btn')
+     .forEach(b => b.classList.toggle('active', b === btn));
+  // 再生中なら即反映
+  if (mainSpeaking) { window.speechSynthesis.cancel(); speakMainChunk(); }
+  // 設定保存
+  const cfg = S.settings; cfg.speechRate = rate; S.saveSettings(cfg);
 }
 
 // ─── 履歴 ────────────────────────────────────────────────────────────────
@@ -139,45 +302,54 @@ async function loadArchive() {
     if (!index.length) { list.innerHTML = '<li class="list-loading">まだ放送がありません</li>'; return; }
     list.innerHTML = '';
     index.forEach(b => {
-      const d = new Date(b.date + 'T00:00:00');
-      const li = document.createElement('li');
-      li.className = 'archive-item';
-      li.innerHTML = `
+      const d      = new Date(b.date + 'T00:00:00');
+      const cached = S.getCachedBroadcast(b.date);
+      const li     = document.createElement('li');
+      li.className  = 'archive-item';
+      li.innerHTML  = `
         <div>
-          <div class="archive-date">${d.toLocaleDateString('ja-JP', {year:'numeric',month:'long',day:'numeric',weekday:'short'})}</div>
-          <div class="archive-meta">${b.news_count}件 · 音声あり</div>
+          <div class="archive-date">${d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })}</div>
+          <div class="archive-meta">${b.news_count}件${cached ? ' · 生成済み' : ''}</div>
         </div>
         <span class="archive-play">▶</span>`;
       li.onclick = () => { switchTab('home'); loadDateBroadcast(b.date); };
       list.appendChild(li);
     });
   } catch (e) {
-    list.innerHTML = `<li class="list-loading">読み込み失敗: ${e.message}</li>`;
+    list.innerHTML = `<li class="list-loading">読み込み失敗: ${escHtml(e.message)}</li>`;
   }
 }
 
-async function loadDateBroadcast(dateStr) {
+async function loadDateBroadcast(date) {
   setHomeState('loading');
+  stopMainSpeak();
+
+  const cached = S.getCachedBroadcast(date);
+  if (cached) { showPlayer(cached); return; }
+
   try {
-    const data = await fetchJSON(`data/${dateStr}.json`);
-    showPlayer(data);
+    const newsData = await fetchJSON(`data/${date}-news.json`);
+    await generateAndShowBroadcast(newsData, date, false);
   } catch (e) {
     setHomeState('error');
     $('home-error-msg').textContent = e.message;
   }
 }
 
-// ─── チャット（Claude API をブラウザから直接呼び出し） ───────────────────
-const RADIO_PROMPT = `
-あなたはプロのラジオパーソナリティです。
+// ─── チャット ─────────────────────────────────────────────────────────────
+const CHAT_SYSTEM = `あなたはプロのラジオパーソナリティです。
 ユーザーのリクエストに応じて、ニュース原稿を作成してください。
-以下のニュース情報を参考に、3〜5分で読める自然な話し言葉のラジオ原稿を書いてください。
-です・ます調で、難しい用語は噛み砕いて説明してください。
-出力は原稿テキストのみ（見出し・説明文不要）。
-`;
+提供されたニュース情報を参考に、3〜5分で読める自然な話し言葉のラジオ原稿を書いてください。
+ルール:
+- です・ます調で自然な話し言葉
+- 難しい用語は噛み砕いて説明
+- 出力は原稿テキストのみ（見出し・説明文・記号・マークダウン不要）
+- 数字は日本語の読みに合わせて表記（例: 2025年→二〇二五年、1兆円→一兆円）
+- 英語略語は初出時にカナ読みを添える（例: AI（エーアイ））
+- 文末は必ず「。」で終わらせる`;
 
-let isSpeaking = false;
-let currentSpeakBtn = null;
+let chatSpeaking    = false;
+let currentChatBtn  = null;
 
 function fillExample(btn) {
   $('chat-input').value = btn.textContent;
@@ -205,37 +377,39 @@ async function sendChat() {
   sendBtn.disabled = true;
 
   const messages = $('chat-messages');
-  const hint = messages.querySelector('.chat-hint');
-  if (hint) hint.remove();
+  messages.querySelector('.chat-hint')?.remove();
 
-  // ユーザーバブル
   messages.appendChild(makeBubble('user', text));
   scrollChat();
 
-  // タイピング
   const typing = makeBubble('typing');
   messages.appendChild(typing);
   scrollChat();
 
   try {
-    // 今日のニュースを文脈として渡す（あれば）
     let newsContext = '';
     try {
-      const today = await fetchJSON(`data/${todayStr()}.json`);
-      newsContext = today.news_items.map(n => `【${n.category}】${n.title}: ${n.summary}`).join('\n');
+      const today  = todayStr();
+      const cached = S.getCachedBroadcast(today);
+      if (cached) {
+        newsContext = cached.news_items.map(n => `【${n.category}】${n.title}: ${n.summary || ''}`).join('\n');
+      } else {
+        const nd = await fetchJSON(`data/${today}-news.json`);
+        newsContext = nd.news_items.map(n => `【${n.category}】${n.title}: ${n.summary || ''}`).join('\n');
+      }
     } catch { /* ニュースなくても続行 */ }
 
-    const userMessage = newsContext
+    const userMsg = newsContext
       ? `今日のニュース情報:\n${newsContext}\n\nユーザーのリクエスト: ${text}`
       : `ユーザーのリクエスト: ${text}（ニュースデータが取得できませんでした。一般的な内容で応答してください）`;
 
-    const script = await callClaude(RADIO_PROMPT, userMessage);
+    const script = await callClaude(CHAT_SYSTEM, userMsg);
     typing.remove();
-    appendAIBubble(messages, script);
+    appendChatAIBubble(messages, script);
     scrollChat();
   } catch (e) {
     typing.remove();
-    messages.appendChild(makeBubble('error', `⚠️ ${e.message}`));
+    messages.appendChild(makeBubble('error', `⚠️ ${escHtml(e.message)}`));
     scrollChat();
   } finally {
     sendBtn.disabled = false;
@@ -245,7 +419,7 @@ async function sendChat() {
 function makeBubble(type, text = '') {
   const div = document.createElement('div');
   if (type === 'user') {
-    div.className = 'bubble-user';
+    div.className   = 'bubble-user';
     div.textContent = text;
   } else if (type === 'typing') {
     div.className = 'bubble-typing';
@@ -257,76 +431,67 @@ function makeBubble(type, text = '') {
   return div;
 }
 
-function appendAIBubble(container, script) {
-  const id = `sp-${Date.now()}`;
+function appendChatAIBubble(container, script) {
   const div = document.createElement('div');
   div.className = 'bubble-ai';
   div.innerHTML = `
     <div class="bubble-ai-inner">カスタムニュースを生成しました</div>
     <div class="chat-player">
       <div class="chat-player-controls">
-        <button class="play-btn-sm" id="${id}" onclick="toggleSpeak('${id}', this._script)">▶ 読み上げ</button>
+        <button class="play-btn-sm">▶ 読み上げ</button>
         <span class="tts-note">端末の音声で再生</span>
       </div>
     </div>
     <details class="chat-script-detail">
       <summary>原稿を読む</summary>
-      <div class="script-text">${script}</div>
+      <div class="script-text">${escHtml(script)}</div>
     </details>`;
   container.appendChild(div);
-
-  // スクリプトをボタンに紐付け
-  const btn = div.querySelector(`#${id}`);
-  btn._script = script;
-  btn.onclick = () => toggleSpeak(btn);
+  div.querySelector('.play-btn-sm').addEventListener('click', function () {
+    toggleChatSpeak(this, script);
+  });
 }
 
-function toggleSpeak(btn) {
-  if (isSpeaking && currentSpeakBtn === btn) {
+function toggleChatSpeak(btn, script) {
+  if (chatSpeaking && currentChatBtn === btn) {
     window.speechSynthesis.cancel();
-    isSpeaking = false;
+    chatSpeaking = false;
     btn.textContent = '▶ 読み上げ';
-    currentSpeakBtn = null;
+    currentChatBtn = null;
     return;
   }
 
-  if (isSpeaking) {
+  if (chatSpeaking) {
     window.speechSynthesis.cancel();
-    if (currentSpeakBtn) currentSpeakBtn.textContent = '▶ 読み上げ';
+    if (currentChatBtn) currentChatBtn.textContent = '▶ 読み上げ';
   }
 
-  const script = btn._script;
-  if (!script || !window.speechSynthesis) {
-    showToast('このブラウザは読み上げに対応していません');
-    return;
-  }
+  if (!window.speechSynthesis) { showToast('このブラウザは読み上げに対応していません'); return; }
 
-  isSpeaking = true;
-  currentSpeakBtn = btn;
+  chatSpeaking   = true;
+  currentChatBtn = btn;
   btn.textContent = '⏸ 停止';
 
-  // 長文を文単位で分割して安定して読み上げる
   const chunks = script.match(/[^。！？\n]+[。！？\n]?/g) || [script];
+  const cfg    = S.settings;
+  const rate   = parseFloat(cfg.speechRate || 1.0);
+  const voice  = resolveVoice(cfg.voiceName);
   let i = 0;
 
-  function speakNext() {
-    if (!isSpeaking || i >= chunks.length) {
-      isSpeaking = false;
-      if (currentSpeakBtn === btn) {
-        btn.textContent = '▶ 読み上げ';
-        currentSpeakBtn = null;
-      }
+  (function speakNext() {
+    if (!chatSpeaking || i >= chunks.length) {
+      chatSpeaking = false;
+      if (currentChatBtn === btn) { btn.textContent = '▶ 読み上げ'; currentChatBtn = null; }
       return;
     }
-    const utt = new SpeechSynthesisUtterance(chunks[i]);
-    utt.lang = 'ja-JP';
-    utt.rate = S.speechRate;
-    utt.onend = () => { i++; speakNext(); };
-    utt.onerror = () => { i++; speakNext(); };
+    const utt   = new SpeechSynthesisUtterance(chunks[i]);
+    utt.lang    = 'ja-JP';
+    utt.rate    = rate;
+    if (voice) utt.voice = voice;
+    utt.onend   = () => { i++; setTimeout(speakNext, 150); };
+    utt.onerror = () => { i++; setTimeout(speakNext, 150); };
     window.speechSynthesis.speak(utt);
-  }
-
-  speakNext();
+  })();
 }
 
 function scrollChat() {
@@ -334,21 +499,63 @@ function scrollChat() {
   m.scrollTop = m.scrollHeight;
 }
 
+// ─── 設定 ─────────────────────────────────────────────────────────────────
+function populateSettings() {
+  const cfg = S.settings;
+  $('setting-key').value = S.apiKey;
+
+  document.querySelectorAll('.cat-checks input[type=checkbox]').forEach(cb => {
+    cb.checked = (cfg.categories || []).includes(cb.value);
+  });
+
+  const max = cfg.maxItems ?? 15;
+  $('setting-max').value           = max;
+  $('setting-max-val').textContent = max + '件';
+
+  $('setting-focus').value   = cfg.focusKeywords   || '';
+  $('setting-exclude').value = cfg.excludeKeywords || '';
+  $('setting-length').value  = cfg.length          || 'standard';
+  $('setting-tone').value    = cfg.tone            || 'casual';
+  $('setting-rate').value    = String(cfg.speechRate ?? 1.0);
+  $('setting-intro').value   = cfg.customIntro     || '';
+  populateVoiceSelector();
+  if (cfg.voiceName) $('setting-voice').value = cfg.voiceName;
+}
+
+function saveSettings() {
+  const key = $('setting-key').value.trim();
+  if (key) S.apiKey = key;
+
+  S.saveSettings({
+    categories:      [...document.querySelectorAll('.cat-checks input:checked')].map(cb => cb.value),
+    maxItems:        parseInt($('setting-max').value, 10),
+    focusKeywords:   $('setting-focus').value.trim(),
+    excludeKeywords: $('setting-exclude').value.trim(),
+    length:          $('setting-length').value,
+    tone:            $('setting-tone').value,
+    speechRate:      parseFloat($('setting-rate').value),
+    customIntro:     $('setting-intro').value.trim(),
+    voiceName:       $('setting-voice').value,
+  });
+
+  showToast('設定を保存しました ✓');
+}
+
 // ─── Claude API 直接呼び出し ─────────────────────────────────────────────
-async function callClaude(systemPrompt, userMessage) {
+async function callClaude(system, userMsg) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': S.apiKey,
-      'anthropic-version': '2023-06-01',
+      'Content-Type':                          'application/json',
+      'x-api-key':                             S.apiKey,
+      'anthropic-version':                     '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-8',
+      model:      'claude-haiku-4-5',
       max_tokens: 2048,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+      system,
+      messages:   [{ role: 'user', content: userMsg }],
     }),
   });
 
@@ -361,210 +568,12 @@ async function callClaude(systemPrompt, userMessage) {
   return data.content[0].text;
 }
 
-// ─── 端末設定（localStorage） ────────────────────────────────────────────
-function populateSettings() {
-  $('setting-key').value      = S.apiKey;
-  $('setting-rate').value     = String(S.speechRate);
-  $('setting-gh-token').value = localStorage.getItem('nr_gh_token') || '';
-}
-
-function saveLocalSettings() {
-  S.apiKey     = $('setting-key').value.trim();
-  S.speechRate = parseFloat($('setting-rate').value);
-  localStorage.setItem('nr_gh_token', $('setting-gh-token').value.trim());
-  showToast('端末設定を保存しました ✓');
-}
-
-// ─── 放送設定（data/config.json → GitHub API で保存） ────────────────────
-
-// URL から GitHub の owner/repo を取得
-function getGitHubInfo() {
-  const host = window.location.hostname;
-  if (!host.endsWith('.github.io')) return null;
-  const owner = host.replace('.github.io', '');
-  const parts  = window.location.pathname.split('/').filter(Boolean);
-  const repo   = parts[0] || owner;
-  return { owner, repo };
-}
-
-// data/config.json を読んで設定画面に反映
-async function loadBroadcastConfig() {
-  try {
-    const cfg = await fetchJSON(`data/config.json?t=${Date.now()}`);
-    applyConfigToForm(cfg);
-  } catch {
-    // 読み込み失敗時はデフォルト値のまま
-  }
-}
-
-function applyConfigToForm(cfg) {
-  $('cfg-enabled').checked = cfg.schedule?.enabled !== false;
-
-  // 曜日
-  document.querySelectorAll('.day-checks input[type=checkbox]').forEach(cb => {
-    cb.checked = (cfg.schedule?.days || []).includes(cb.value);
-  });
-
-  // カテゴリ
-  document.querySelectorAll('.cat-checks input[type=checkbox]').forEach(cb => {
-    cb.checked = (cfg.news?.categories || []).includes(cb.value);
-  });
-
-  // 件数
-  const max = cfg.news?.max_items ?? 15;
-  $('cfg-max-items').value = max;
-  $('cfg-max-items-val').textContent = max + '件';
-
-  // キーワード
-  $('cfg-focus').value   = (cfg.news?.focus_keywords   || []).join(', ');
-  $('cfg-exclude').value = (cfg.news?.exclude_keywords || []).join(', ');
-
-  // スタイル
-  $('cfg-length').value = cfg.style?.length || 'standard';
-  $('cfg-tone').value   = cfg.style?.tone   || 'casual';
-  $('cfg-intro').value  = cfg.style?.custom_intro || '';
-}
-
-function readConfigFromForm() {
-  const days = [...document.querySelectorAll('.day-checks input:checked')].map(cb => cb.value);
-  const cats = [...document.querySelectorAll('.cat-checks input:checked')].map(cb => cb.value);
-  const toArr = str => str.split(',').map(s => s.trim()).filter(Boolean);
-
-  return {
-    schedule: {
-      enabled: $('cfg-enabled').checked,
-      days,
-    },
-    news: {
-      categories:       cats,
-      max_items:        parseInt($('cfg-max-items').value, 10),
-      focus_keywords:   toArr($('cfg-focus').value),
-      exclude_keywords: toArr($('cfg-exclude').value),
-    },
-    style: {
-      length:       $('cfg-length').value,
-      tone:         $('cfg-tone').value,
-      custom_intro: $('cfg-intro').value.trim(),
-    },
-  };
-}
-
-async function saveBroadcastSettings() {
-  const token = localStorage.getItem('nr_gh_token') || '';
-  if (!token) {
-    showToast('GitHub トークンを入力してください');
-    return;
-  }
-
-  const ghInfo = getGitHubInfo();
-  if (!ghInfo) {
-    showToast('GitHub Pages 上でのみ保存できます');
-    return;
-  }
-
-  const btn    = $('save-broadcast-btn');
-  const status = $('save-broadcast-status');
-  btn.disabled = true;
-  status.textContent = '保存中...';
-
-  try {
-    const config = readConfigFromForm();
-    await pushConfigToGitHub(config, ghInfo, token);
-    status.textContent = '✓ 保存しました。次回の自動生成から反映されます。';
-    showToast('放送設定を保存しました ✓');
-  } catch (e) {
-    status.textContent = `⚠️ ${e.message}`;
-    showToast('保存に失敗しました');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function pushConfigToGitHub(config, { owner, repo }, token) {
-  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/data/config.json`;
-  const headers = {
-    'Authorization': `Bearer ${token}`,
-    'Accept': 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-  };
-
-  // 現在のファイルの SHA を取得
-  const getRes = await fetch(apiUrl, { headers });
-  if (!getRes.ok) {
-    const err = await getRes.json().catch(() => ({}));
-    throw new Error(err.message || `GitHub API エラー (${getRes.status})`);
-  }
-  const { sha } = await getRes.json();
-
-  // ファイルを更新
-  const content = encodeBase64Utf8(JSON.stringify(config, null, 2) + '\n');
-  const putRes  = await fetch(apiUrl, {
-    method: 'PUT',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: '⚙️ 放送設定を更新', content, sha }),
-  });
-
-  if (!putRes.ok) {
-    const err = await putRes.json().catch(() => ({}));
-    throw new Error(err.message || `保存失敗 (${putRes.status})`);
-  }
-}
-
-function encodeBase64Utf8(str) {
-  const bytes  = new TextEncoder().encode(str);
-  const binary = Array.from(bytes, b => String.fromCharCode(b)).join('');
-  return btoa(binary);
-}
-
-// ─── 音声プレイヤー（MP3用） ──────────────────────────────────────────────
-function bindAudioEvents(audio, seekId, curId, durId, btnId) {
-  const seek = $(seekId), cur = $(curId), dur = $(durId), btn = $(btnId);
-  if (!audio || !seek) return;
-
-  audio.addEventListener('loadedmetadata', () => {
-    seek.max = audio.duration;
-    dur.textContent = fmt(audio.duration);
-  });
-  audio.addEventListener('timeupdate', () => {
-    seek.value = audio.currentTime;
-    cur.textContent = fmt(audio.currentTime);
-    const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
-    seek.style.background = `linear-gradient(to right, var(--accent) ${pct}%, var(--border) ${pct}%)`;
-  });
-  audio.addEventListener('ended', () => { if (btn) btn.textContent = '▶'; });
-}
-
-function togglePlay(audioId, btnId) {
-  const audio = $(audioId), btn = $(btnId);
-  if (!audio) return;
-  if (audio.paused) {
-    document.querySelectorAll('audio').forEach(a => { if (a !== audio && !a.paused) a.pause(); });
-    audio.play();
-    if (btn) btn.textContent = '⏸';
-  } else {
-    audio.pause();
-    if (btn) btn.textContent = '▶';
-  }
-}
-
-function seekAudio(audioId, seekId) {
-  const a = $(audioId), s = $(seekId);
-  if (a && s) a.currentTime = parseFloat(s.value);
-}
-
-function setSpeed(audioId, rate, btn) {
-  const a = $(audioId);
-  if (a) a.playbackRate = rate;
-  btn.closest('.speed-row').querySelectorAll('.speed-btn')
-     .forEach(b => b.classList.toggle('active', b === btn));
-}
-
-function fmt(sec) {
-  if (!sec || isNaN(sec)) return '0:00';
-  return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
-}
-
 // ─── ユーティリティ ───────────────────────────────────────────────────────
+function resolveVoice(name) {
+  if (!name) return null;
+  return speechSynthesis.getVoices().find(v => v.name === name) || null;
+}
+
 function toggleVis(id) {
   const el = $(id);
   el.type = el.type === 'password' ? 'text' : 'password';
@@ -595,6 +604,40 @@ async function fetchJSON(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json();
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ─── 音声リスト ───────────────────────────────────────────────────────────
+function populateVoiceSelector() {
+  const sel = $('setting-voice');
+  if (!sel) return;
+  const voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('ja'));
+  if (!voices.length) return;
+
+  // 既存オプションを保持しつつ重複追加を防ぐ
+  sel.innerHTML = '<option value="">システムデフォルト</option>';
+  voices.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value       = v.name;
+    opt.textContent = v.name + (v.localService ? '' : ' 〔オンライン〕');
+    sel.appendChild(opt);
+  });
+
+  const saved = S.settings.voiceName || '';
+  if (saved) sel.value = saved;
+}
+
+// Chrome系はvoiceschangedイベント待ち、Safari系は同期で取得可
+if (typeof speechSynthesis !== 'undefined') {
+  speechSynthesis.addEventListener('voiceschanged', populateVoiceSelector);
+  populateVoiceSelector();
 }
 
 // ─── 起動 ─────────────────────────────────────────────────────────────────
