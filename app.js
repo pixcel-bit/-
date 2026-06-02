@@ -75,7 +75,7 @@ async function fetchViaProxy(url) {
 function parseRSS(xmlText, source, category) {
   const doc   = new DOMParser().parseFromString(xmlText, 'text/xml');
   const items = [...doc.querySelectorAll('item')];
-  return items.map(item => {
+  return items.map((item, idx) => {
     const linkEl  = item.querySelector('link');
     const guidEl  = item.querySelector('guid');
     const url     = linkEl?.textContent?.trim() || guidEl?.textContent?.trim() || '';
@@ -88,6 +88,7 @@ function parseRSS(xmlText, source, category) {
       source,
       category,
       pub_date: item.querySelector('pubDate')?.textContent?.trim() || '',
+      feedRank: idx,
     };
   }).filter(n => n.title);
 }
@@ -112,7 +113,7 @@ async function fetchAllRSS() {
 
 function $(id) { return document.getElementById(id); }
 
-// ─── グッド・好み分析 ────────────────────────────────────────────────────────
+// ─── グッド・好み分析 ──────────────────────────────────────────────────────
 function getLikedNews() {
   return LS.getJSON('nr_liked_news', []);
 }
@@ -154,6 +155,42 @@ function scoreItemByPrefs(item, prefs) {
   for (const kw of prefs.topKeywords) {
     if (text.includes(kw)) score += 2;
   }
+  return score;
+}
+
+// クロスソースマップ：同じ話題を複数ソースが報じているか検出
+function buildCrossSourceMap(allItems) {
+  const getWords = title => (title.match(/[一-鿿゠-ヿ]{2,}/g) || []);
+  const wordIndex = {};
+  for (const item of allItems) {
+    for (const w of getWords(item.title)) {
+      (wordIndex[w] = wordIndex[w] || []).push(item);
+    }
+  }
+  const map = {};
+  for (const item of allItems) {
+    const otherSources = new Set();
+    for (const w of getWords(item.title)) {
+      for (const related of (wordIndex[w] || [])) {
+        if (related.title !== item.title && related.source !== item.source) {
+          otherSources.add(related.source);
+        }
+      }
+    }
+    map[item.title] = otherSources.size;
+  }
+  return map;
+}
+
+// 記事の総合重要度スコア
+function computeScore(item, prefs, crossSourceMap) {
+  let score = 0;
+  // フィード内順位（0位=最重要で最大10点）
+  score += Math.max(0, 10 - (item.feedRank || 0)) * 1.5;
+  // クロスソース（複数メディアが同話題を報じると+8点/ソース）
+  score += (crossSourceMap[item.title] || 0) * 8;
+  // ユーザー好み
+  score += scoreItemByPrefs(item, prefs);
   return score;
 }
 
@@ -293,46 +330,50 @@ async function loadToday() {
       if (excl.length) items = items.filter(n => !excl.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
     }
 
-    // 優先キーワード（先頭へ）
+    // 優先キーワード（スコアブースト）
+    let focusBoost = new Set();
     if (cfg.focusKeywords) {
       const focus = cfg.focusKeywords.split(',').map(s => s.trim()).filter(Boolean);
       if (focus.length) {
-        const hi = items.filter(n =>  focus.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
-        const lo = items.filter(n => !focus.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
-        items = [...hi, ...lo];
+        items.forEach(n => {
+          if (focus.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw))) {
+            focusBoost.add(n.title);
+          }
+        });
       }
     }
 
-    // カテゴリ均等配分：各カテゴリから順番に1件ずつ選ぶ（好み順にソート）
+    // ─── 重要度スコアで選定（カテゴリ多様性を保証）───
     const maxItems = cfg.maxItems || 15;
     const prefs = getPreferences();
-    const byCategory = {};
-    for (const item of items) {
-      (byCategory[item.category] = byCategory[item.category] || []).push(item);
-    }
-    // 好みスコアでカテゴリ内ソート（好みに近い記事を先頭へ）
-    if (prefs) {
-      for (const cat of Object.keys(byCategory)) {
-        byCategory[cat].sort((a, b) => scoreItemByPrefs(b, prefs) - scoreItemByPrefs(a, prefs));
+    const crossSourceMap = buildCrossSourceMap(allItems);
+
+    // 全アイテムをスコア付きでソート
+    const scored = items
+      .map(item => ({
+        ...item,
+        _score: computeScore(item, prefs, crossSourceMap) + (focusBoost.has(item.title) ? 20 : 0),
+      }))
+      .sort((a, b) => b._score - a._score);
+
+    // 第1パス：各カテゴリから最高スコアを1件ずつ確保（多様性保証）
+    const selected = [];
+    const usedCats = new Set();
+    for (const item of scored) {
+      if (selected.length >= maxItems) break;
+      if (!usedCats.has(item.category)) {
+        selected.push(item);
+        usedCats.add(item.category);
       }
     }
-    // 好みカテゴリを先頭にしてラウンドロビン（多めに拾われるよう順序調整）
-    const cats = Object.keys(byCategory).sort((a, b) =>
-      (prefs ? (prefs.catCount[b] || 0) - (prefs.catCount[a] || 0) : 0)
-    );
-    const balanced = [];
-    let added = true;
-    while (balanced.length < maxItems && added) {
-      added = false;
-      for (const cat of cats) {
-        if (balanced.length >= maxItems) break;
-        if (byCategory[cat].length) {
-          balanced.push(byCategory[cat].shift());
-          added = true;
-        }
+    // 第2パス：残枠をスコア順で埋める
+    for (const item of scored) {
+      if (selected.length >= maxItems) break;
+      if (!selected.some(s => s.title === item.title)) {
+        selected.push(item);
       }
     }
-    items = balanced;
+    items = selected;
     if (!items.length) items = allItems.slice(0, 5);
 
     $('home-gen-msg').textContent = 'AIが放送原稿を作成中...';
@@ -959,7 +1000,7 @@ function renderCustomCategories() {
   custom.forEach(name => {
     const tag = document.createElement('span');
     tag.className = 'cat-tag';
-    tag.innerHTML = `${escHtml(name)}<button class="cat-tag-remove" onclick="removeCustomCategory('${escHtml(name).replace(/'/g, "\\'")}')">&times;</button>`;
+    tag.innerHTML = `${escHtml(name)}<button class="cat-tag-remove" onclick="removeCustomCategory('${escHtml(name).replace(/'/g, "\\'")}')">✕</button>`;
     container.appendChild(tag);
   });
 }
