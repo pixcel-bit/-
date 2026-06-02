@@ -279,7 +279,7 @@ function showPlayer(broadcast, isYesterday = false) {
 
   const list = $('home-news-list');
   list.innerHTML = '';
-  (broadcast.news_items || []).forEach(item => {
+  (broadcast.news_items || []).forEach((item, idx) => {
     const li  = document.createElement('li');
     li.className = 'news-item';
     li.innerHTML = `
@@ -289,7 +289,12 @@ function showPlayer(broadcast, isYesterday = false) {
       </div>
       <div class="news-title">${escHtml(item.title || '')}</div>
       <div class="news-summary">${escHtml(item.summary || '')}</div>
+      <div class="news-item-actions">
+        <button class="news-btn" onclick="jumpToNewsAndPlay(${idx})">▶ ここから再生</button>
+        <button class="news-btn" onclick="showDeepDiveModal(${idx})">🔍 深掘り</button>
+      </div>
       ${item.url ? `<a class="news-source-link" href="${escHtml(item.url)}" target="_blank" rel="noopener">元記事を読む →</a>` : ''}`;
+    li.dataset.newsIndex = idx;
     list.appendChild(li);
   });
 }
@@ -351,6 +356,168 @@ function setMainSpeed(rate, btn) {
      .forEach(b => b.classList.toggle('active', b === btn));
   if (mainSpeaking) { window.speechSynthesis.cancel(); speakMainChunk(); }
   const cfg = S.settings; cfg.speechRate = rate; S.saveSettings(cfg);
+}
+
+function buildNewsIndexMap(numNews, numChunks) {
+  const map = {};
+  const chunksPerNews = numNews > 0 ? Math.floor(numChunks / numNews) : 0;
+  for (let i = 0; i < numNews; i++) {
+    map[i] = Math.max(0, i * chunksPerNews);
+  }
+  return map;
+}
+
+function jumpToNewsAndPlay(newsIdx) {
+  const broadcast = LS.getJSON(`nr_broadcast_${todayStr()}`);
+  if (!broadcast || !broadcast.news_items) return;
+
+  if (!mainChunks || mainChunks.length === 0) return;
+  const map = buildNewsIndexMap(broadcast.news_items.length, mainChunks.length);
+  const startChunk = map[newsIdx];
+
+  stopMainSpeak();
+  mainChunkIdx = startChunk;
+  startMainSpeak();
+}
+
+function showDeepDiveModal(newsIdx) {
+  const broadcast = LS.getJSON(`nr_broadcast_${todayStr()}`);
+  if (!broadcast || !broadcast.news_items || !broadcast.news_items[newsIdx]) return;
+
+  const item = broadcast.news_items[newsIdx];
+  const title = item.title || '';
+
+  let modal = document.getElementById('deep-dive-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'deep-dive-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <h3>「${escHtml(title)}」を深掘り</h3>
+        <textarea id="deep-dive-input" placeholder="どう掘り下げたいですか？例：背景や原因、今後の影響、詳しい解説など..." rows="4"></textarea>
+        <div class="modal-buttons">
+          <button class="btn-secondary" onclick="closeDeepDiveModal()">キャンセル</button>
+          <button class="btn-primary" onclick="executeDeepDive()">読み上げ</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  } else {
+    modal.querySelector('h3').textContent = `「${escHtml(title)}」を深掘り`;
+  }
+
+  modal.dataset.newsIndex = newsIdx;
+  modal.style.display = 'flex';
+  modal.querySelector('#deep-dive-input').focus();
+}
+
+function closeDeepDiveModal() {
+  const modal = document.getElementById('deep-dive-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function executeDeepDive() {
+  const modal = document.getElementById('deep-dive-modal');
+  if (!modal) return;
+  const newsIdx = parseInt(modal.dataset.newsIndex);
+  const instruction = modal.querySelector('#deep-dive-input').value.trim();
+  if (!instruction) {
+    showToast('掘り下げの内容を入力してください');
+    return;
+  }
+  closeDeepDiveModal();
+  await performDeepDive(newsIdx, instruction);
+}
+
+async function performDeepDive(newsIdx, instruction) {
+  const broadcast = LS.getJSON(`nr_broadcast_${todayStr()}`);
+  if (!broadcast || !broadcast.news_items || !broadcast.news_items[newsIdx]) return;
+
+  const item = broadcast.news_items[newsIdx];
+  if (!S.apiKey) {
+    showToast('APIキーが設定されていません');
+    return;
+  }
+
+  showToast('深掘り内容を生成中...');
+
+  try {
+    const system = 'あなたはニュース解説の専門家です。ユーザーのリクエストに応じて、詳しく分かりやすく説明してください。';
+    const userMsg = `以下のニュースについて、掘り下げてください。
+
+ニュース：【${item.category}】${item.title}
+概要：${item.summary || ''}
+
+ユーザーの指示：${instruction}
+
+ルール：
+- です・ます調で自然な話し言葉
+- 難しい用語は噛み砕いて説明
+- 出力は読み上げ可能なテキストのみ
+- 文末は「。」で終わらせる`;
+
+    const deepDiveText = await callClaude(system, userMsg);
+    addDeepDiveResult(newsIdx, instruction, deepDiveText);
+  } catch (e) {
+    showToast(`エラー: ${e.message}`);
+  }
+}
+
+function addDeepDiveResult(newsIdx, instruction, text) {
+  let resultsContainer = document.getElementById('deep-dive-results');
+  if (!resultsContainer) {
+    resultsContainer = document.createElement('div');
+    resultsContainer.id = 'deep-dive-results';
+    resultsContainer.className = 'deep-dive-results';
+    const playerEl = document.querySelector('#home-player details:last-of-type');
+    if (playerEl) {
+      playerEl.parentNode.insertBefore(resultsContainer, playerEl.nextSibling);
+    }
+  }
+
+  const resultDiv = document.createElement('div');
+  resultDiv.className = 'deep-dive-result';
+  resultDiv.innerHTML = `
+    <div class="deep-dive-header">
+      <h4>掘り下げ: ${escHtml(instruction)}</h4>
+      <button class="deep-dive-read" onclick="readDeepDiveText(this)">▶ 読み上げ</button>
+    </div>
+    <div class="deep-dive-text">${escHtml(text)}</div>
+  `;
+
+  resultDiv.dataset.text = text;
+  resultsContainer.appendChild(resultDiv);
+  showToast('深掘り完了！');
+}
+
+function readDeepDiveText(btn) {
+  const resultDiv = btn.closest('.deep-dive-result');
+  const text = resultDiv.dataset.text;
+  if (!text) return;
+
+  const chunks = text.match(/[^。！？\n]+[。！？\n]?/g) || [text];
+  const cfg = S.settings;
+  const rate = parseFloat(cfg.speechRate || 1.0);
+  const voice = resolveVoice(cfg.voiceName);
+  let idx = 0;
+
+  stopMainSpeak();
+  btn.textContent = '⏸ 停止中';
+
+  (function speakNext() {
+    if (idx >= chunks.length) {
+      btn.textContent = '▶ 読み上げ';
+      return;
+    }
+    const utt = new SpeechSynthesisUtterance(chunks[idx]);
+    utt.lang = 'ja-JP';
+    utt.rate = rate;
+    if (voice) utt.voice = voice;
+    utt.onend = () => { idx++; setTimeout(speakNext, 150); };
+    utt.onerror = () => { idx++; setTimeout(speakNext, 150); };
+    window.speechSynthesis.speak(utt);
+  })();
 }
 
 // ─── 履歴 ────────────────────────────────────────────────────────────────
