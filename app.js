@@ -25,6 +25,7 @@ const S = {
       tone:             'casual',
       speechRate:       1.0,
       customIntro:      '',
+      aiProfile:        null,
     });
   },
   saveSettings(cfg) { LS.setJSON('nr_settings', cfg); },
@@ -258,12 +259,19 @@ function isAIRelated(item) {
 // 記事の総合重要度スコア
 function computeScore(item, prefs, crossSourceMap) {
   let score = 0;
-  // フィード内順位（上位ほど重要。0位=最重要で最大10点）
+  // フィード内順位（上位ほど重要。0位=最重要で最大15点）
   score += Math.max(0, 10 - (item.feedRank || 0)) * 1.5;
   // クロスソース（複数メディアが同話題を報じると+8点/ソース）
   score += (crossSourceMap[item.title] || 0) * 8;
-  // ユーザー好み
+  // グッド/バッドボタン実績
   score += scoreItemByPrefs(item, prefs);
+  // AIプロファイル（+4/-4点/トピック）
+  const profile = S.settings.aiProfile;
+  if (profile) {
+    const text = `${item.title} ${item.summary || ''} ${item.category}`;
+    for (const t of (profile.positiveTopics || [])) { if (text.includes(t)) score += 4; }
+    for (const t of (profile.negativeTopics || [])) { if (text.includes(t)) score -= 4; }
+  }
   return score;
 }
 
@@ -511,12 +519,16 @@ async function generateScript(items, cfg, prefs = null) {
   const dislikeLine  = prefs && prefs.dislikeTotal > 0
     ? `- 興味なし（バッドボタン実績より）: カテゴリ「${Object.keys(prefs.dislikeCatCount).join('・')}」、キーワード「${prefs.topDislikeKeywords.slice(0, 5).join('・')}」。これらのトピックは簡潔にまとめるか省略してください。\n`
     : '';
+  const profile      = cfg.aiProfile;
+  const profileLine  = profile?.profileText
+    ? `- ユーザーの好みプロファイル: ${profile.profileText}${profile.positiveAngles?.length ? `（重視する視点: ${profile.positiveAngles.join('・')}）` : ''}。\n`
+    : '';
 
   const system = `あなたはプロのラジオパーソナリティです。
 以下のニュース情報をもとに、${lengthMap[cfg.length] || lengthMap.standard}のラジオ放送原稿を作成してください。
 トーンは${toneMap[cfg.tone] || toneMap.casual}口調です。
 ${intro}ルール:
-${customLine}${prefLine}${dislikeLine}- です・ます調で自然な話し言葉
+${customLine}${prefLine}${dislikeLine}${profileLine}- です・ます調で自然な話し言葉
 - 難しい用語は噛み砕いて説明
 - 出力は原稿テキストのみ（見出し・箇条書き・記号・マークダウン不要）
 - 数字は日本語の読みに合わせて表記（例: 2025年→二〇二五年、1兆円→一兆円）
@@ -1034,6 +1046,82 @@ function populateSettings() {
   if (cfg.voiceName) $('setting-voice').value = cfg.voiceName;
   renderCustomCategories();
   renderSourceSettings();
+  const profile = S.settings.aiProfile;
+  if ($('profile-input')) $('profile-input').value = profile?.profileText || '';
+  renderProfileResult(profile);
+}
+
+function renderProfileResult(profile) {
+  const el = $('profile-result');
+  if (!el) return;
+  if (!profile?.analyzedAt) { el.style.display = 'none'; return; }
+  const pos = t => `<span class="profile-tag">${escHtml(t)}</span>`;
+  const neg = t => `<span class="profile-tag negative">${escHtml(t)}</span>`;
+  el.innerHTML = `
+    <div class="profile-result-row">
+      <span class="profile-result-label">興味あり</span>
+      <div class="profile-tags">${(profile.positiveTopics || []).map(pos).join('')}</div>
+    </div>
+    ${(profile.positiveAngles || []).length ? `
+    <div class="profile-result-row">
+      <span class="profile-result-label">視点</span>
+      <div class="profile-tags">${profile.positiveAngles.map(pos).join('')}</div>
+    </div>` : ''}
+    ${(profile.negativeTopics || []).length ? `
+    <div class="profile-result-row">
+      <span class="profile-result-label">興味なし</span>
+      <div class="profile-tags">${profile.negativeTopics.map(neg).join('')}</div>
+    </div>` : ''}
+    <div class="profile-analyzed-at">最終分析: ${new Date(profile.analyzedAt).toLocaleString('ja-JP')}</div>
+  `;
+  el.style.display = '';
+}
+
+async function analyzeProfile() {
+  const text = $('profile-input')?.value.trim();
+  if (!text) { showToast('好みのテキストを入力してください'); return; }
+  if (!S.apiKey) { showToast('APIキーが設定されていません'); switchTab('settings'); return; }
+
+  const btn = $('profile-analyze-btn');
+  btn.disabled = true;
+  btn.textContent = '分析中...';
+
+  try {
+    const system = `ユーザーのニュースの好み・関心を分析して、以下のJSON形式のみで返してください。
+固定カテゴリに縛らず、ユーザーの言葉のニュアンスを活かした具体的なトピック・キーワードを抽出してください。
+
+{
+  "positiveTopics": ["興味あるトピック・キーワード（10〜20語）"],
+  "positiveAngles": ["好む切り口・視点（3〜5語）"],
+  "negativeTopics": ["興味なし・不要なトピック（0〜10語）"]
+}
+
+ルール:
+- 「テクノロジー」より「エンタープライズAI活用」「SaaS導入事例」のように具体的に
+- ユーザーの職業・文脈を読み取り、業務に関連するキーワードも含める
+- 日本語で返す
+- JSONのみ出力（前後に説明文・マークダウン不要）`;
+
+    const raw    = await callClaude(system, `ユーザーの好み:\n${text}`);
+    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)[0]);
+
+    const cfg    = S.settings;
+    cfg.aiProfile = {
+      profileText:    text,
+      positiveTopics: parsed.positiveTopics || [],
+      positiveAngles: parsed.positiveAngles || [],
+      negativeTopics: parsed.negativeTopics || [],
+      analyzedAt:     new Date().toISOString(),
+    };
+    S.saveSettings(cfg);
+    renderProfileResult(cfg.aiProfile);
+    showToast('プロファイルを保存しました ✓');
+  } catch (e) {
+    showToast(`分析エラー: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ AIで分析・保存';
+  }
 }
 
 function renderSourceSettings() {
@@ -1091,6 +1179,7 @@ function saveSettings() {
     speechRate:       parseFloat($('setting-rate').value),
     customIntro:      $('setting-intro').value.trim(),
     voiceName:        $('setting-voice').value,
+    aiProfile:        S.settings.aiProfile || null,
   });
 
   showToast('設定を保存しました ✓');

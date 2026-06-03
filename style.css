@@ -1313,3 +1313,44 @@ details[open] .news-detail summary::before,
 .source-check:has(input:not(:checked)) {
   opacity: 0.4;
 }
+
+/* ─── AIプロファイル ────────────────────────────────────────────────────── */
+.profile-result-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.profile-result-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text2);
+  min-width: 56px;
+  padding-top: 4px;
+  flex-shrink: 0;
+}
+
+.profile-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.profile-tag {
+  background: var(--accent);
+  color: white;
+  border-radius: 12px;
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.profile-tag.negative {
+  background: #f44336;
+}
+
+.profile-analyzed-at {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}

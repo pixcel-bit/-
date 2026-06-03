@@ -228,6 +228,15 @@
           </label>
         </section>
 
+        <div class="settings-group-label" style="margin-top:20px">🧠 好みのプロファイル</div>
+        <section class="settings-section">
+          <h3>AIによるアルゴリズムカスタマイズ</h3>
+          <small>好みや関心を自由に入力してください。AIが分析し、ニュース選定スコアと原稿生成の両方に反映します。</small>
+          <textarea id="profile-input" rows="4" style="margin-top:8px" placeholder="例: テックタッチのCS担当として、B2B SaaSの動向とAI活用に強い関心があります。エンタープライズ向けのAI導入事例、カスタマーサクセスに関する情報を優先してほしいです。スポーツや芸能ニュースは不要です。"></textarea>
+          <button type="button" id="profile-analyze-btn" class="btn-primary" onclick="analyzeProfile()" style="margin-top:8px;width:100%">✨ AIで分析・保存</button>
+          <div id="profile-result" style="display:none;margin-top:12px"></div>
+        </section>
+
         <div class="settings-group-label" style="margin-top:20px">📡 ニュースソース</div>
         <section class="settings-section">
           <h3>取得するソースを選択</h3>
