@@ -75,6 +75,23 @@ const RSS_SOURCES = [
   { url: 'https://pc.watch.impress.co.jp/rss/pc/news.rdf', source: 'PC Watch', category: 'テクノロジー' },
   { url: 'https://news.mynavi.jp/rss/it', source: 'マイナビニュース', category: 'テクノロジー' },
   { url: 'https://www.gizmodo.jp/feed/', source: 'Gizmodo Japan', category: 'テクノロジー' },
+  // ── 妻向け・実用書テーマ強化 ──
+  { url: 'https://www.businessinsider.jp/feed/index.xml', source: 'Business Insider Japan', category: 'ビジネス' },
+  { url: 'https://www.moneypost.jp/feed', source: 'マネーポストWEB', category: 'ビジネス' },
+  { url: 'https://gentosha-go.com/rss', source: '幻冬舎ゴールドオンライン', category: 'ビジネス' },
+  { url: 'https://www.huffingtonpost.jp/feeds/index.xml', source: 'ハフポスト', category: '社会' },
+  { url: 'https://bunshun.jp/list/article/rss', source: '文春オンライン', category: '社会' },
+  { url: 'https://dot.asahi.com/rss/index.rdf', source: 'AERA dot.', category: '社会' },
+  { url: 'https://gooday.nikkei.co.jp/rss/', source: '日経Gooday', category: '科学・文化' },
+  { url: 'https://courrier.jp/feed/', source: 'クーリエ・ジャポン', category: '国際' },
+  // ── さらなる拡充 ──
+  { url: 'https://www.sankei.com/rss/news/flash.xml', source: '産経ニュース', category: '主要' },
+  { url: 'https://mainichi.jp/rss/etc/mainichi-flash.rss', source: '毎日新聞', category: '主要' },
+  { url: 'https://ascii.jp/rss.xml', source: 'ASCII.jp', category: 'テクノロジー' },
+  { url: 'https://natgeo.nikkeibp.co.jp/nng/article/news/rss/', source: 'ナショジオ日本版', category: '科学・文化' },
+  { url: 'https://woman.nikkei.com/atcl/rss/', source: '日経xWOMAN', category: 'ビジネス' },
+  { url: 'https://diamond.jp/rss', source: 'ダイヤモンドオンライン', category: 'ビジネス' },
+  { url: 'https://resemom.jp/rss/20/index.rdf', source: 'リセマム', category: '社会' },
 ];
 
 async function fetchViaProxy(url) {
