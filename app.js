@@ -15,7 +15,7 @@ const S = {
 
   get settings() {
     return LS.getJSON('nr_settings', {
-      categories:       ['主要', '社会', '政治', '経済', '国際', 'スポーツ', '科学・文化', 'テクノロジー', 'AI', 'ビジネス'],
+      categories:       ['主要', '社会', '政治', '経済', '国際', 'スポーツ', '科学・文化', 'テクノロジー', 'AI', 'SaaS', 'ビジネス'],
       customCategories: [],
       excludedSources:  [],
       maxItems:         15,
@@ -63,6 +63,13 @@ const RSS_SOURCES = [
   { url: 'https://www.publickey1.jp/atom.xml', source: 'Publickey', category: 'テクノロジー' },
   { url: 'https://japan.zdnet.com/rss/all/', source: 'ZDNet Japan', category: 'テクノロジー' },
   { url: 'https://rss.itmedia.co.jp/rss/2.0/aiplus.xml', source: 'ITmedia AI+', category: 'AI' },
+  { url: 'https://venturebeat.com/category/ai/feed/', source: 'VentureBeat AI', category: 'AI' },
+  { url: 'https://www.technologyreview.com/feed/', source: 'MIT Technology Review', category: 'AI' },
+  { url: 'https://ledge.ai/feed/', source: 'Ledge.ai', category: 'AI' },
+  { url: 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', source: 'The Verge AI', category: 'AI' },
+  { url: 'https://www.saastr.com/feed/', source: 'SaaStr', category: 'SaaS' },
+  { url: 'https://www.producthunt.com/feed', source: 'Product Hunt', category: 'SaaS' },
+  { url: 'https://techcrunch.com/category/enterprise/feed/', source: 'TechCrunch Enterprise', category: 'SaaS' },
   { url: 'https://toyokeizai.net/list/feed/rss', source: '東洋経済', category: 'ビジネス' },
   { url: 'https://gendai.media/rss', source: '現代ビジネス', category: 'ビジネス' },
   { url: 'https://president.jp/list/rss/top', source: 'プレジデントオンライン', category: 'ビジネス' },
