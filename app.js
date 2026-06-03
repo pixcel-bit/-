@@ -194,13 +194,22 @@ function getPreferences() {
 function scoreItemByPrefs(item, prefs) {
   if (!prefs) return 0;
   let score = 0;
-  const text = `${item.title} ${item.summary || ''}`;
-  // グッドボーナス
-  score += (prefs.catCount[item.category] || 0) * 3;
-  for (const kw of prefs.topKeywords) { if (text.includes(kw)) score += 2; }
-  // バッドペナルティ
-  score -= (prefs.dislikeCatCount?.[item.category] || 0) * 3;
-  for (const kw of (prefs.topDislikeKeywords || [])) { if (text.includes(kw)) score -= 2; }
+  const text         = `${item.title} ${item.summary || ''}`;
+  const total        = Math.max(prefs.total        || 1, 1);
+  const dislikeTotal = Math.max(prefs.dislikeTotal || 1, 1);
+
+  // グッドボーナス（割合ベース・最大+12点）
+  score += ((prefs.catCount[item.category] || 0) / total) * 12;
+  let kwScore = 0;
+  for (const kw of prefs.topKeywords) { if (text.includes(kw)) kwScore += 2; }
+  score += Math.min(kwScore, 6); // キーワードは最大+6点
+
+  // バッドペナルティ（同様に割合ベース・最大-12点）
+  score -= ((prefs.dislikeCatCount?.[item.category] || 0) / dislikeTotal) * 12;
+  let dkwScore = 0;
+  for (const kw of (prefs.topDislikeKeywords || [])) { if (text.includes(kw)) dkwScore += 2; }
+  score -= Math.min(dkwScore, 6);
+
   return score;
 }
 
