@@ -1242,3 +1242,62 @@ details[open] .news-detail summary::before,
 .like-submit-btn:active {
   opacity: 0.8;
 }
+
+/* ─── ソース設定 ────────────────────────────────────────────────────────── */
+.source-group {
+  margin-bottom: 14px;
+}
+
+.source-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.source-cat-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  letter-spacing: 0.03em;
+}
+
+.btn-src-all {
+  font-size: 11px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text2);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.btn-src-all:hover { border-color: var(--accent); color: var(--accent); }
+
+.source-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.source-check {
+  display: flex;
+  align-items: center;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+  user-select: none;
+}
+.source-check input { display: none; }
+.source-check:has(input:checked) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.source-check:has(input:not(:checked)) {
+  opacity: 0.4;
+}

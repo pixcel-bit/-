@@ -17,6 +17,7 @@ const S = {
     return LS.getJSON('nr_settings', {
       categories:       ['主要', '社会', '政治', '経済', '国際', 'スポーツ', '科学・文化', 'テクノロジー', 'AI', 'ビジネス'],
       customCategories: [],
+      excludedSources:  [],
       maxItems:         15,
       focusKeywords:    '',
       excludeKeywords:  '',
@@ -129,8 +130,10 @@ function parseRSS(xmlText, source, category) {
 }
 
 async function fetchAllRSS() {
+  const excluded = new Set(S.settings.excludedSources || []);
+  const active   = RSS_SOURCES.filter(s => !excluded.has(s.source));
   const results = await Promise.allSettled(
-    RSS_SOURCES.map(s => fetchViaProxy(s.url).then(xml => parseRSS(xml, s.source, s.category)))
+    active.map(s => fetchViaProxy(s.url).then(xml => parseRSS(xml, s.source, s.category)))
   );
   const seen  = new Set();
   const items = [];
@@ -976,6 +979,46 @@ function populateSettings() {
   populateVoiceSelector();
   if (cfg.voiceName) $('setting-voice').value = cfg.voiceName;
   renderCustomCategories();
+  renderSourceSettings();
+}
+
+function renderSourceSettings() {
+  const excluded = new Set(S.settings.excludedSources || []);
+  const groups   = new Map();
+  for (const s of RSS_SOURCES) {
+    if (!groups.has(s.category)) groups.set(s.category, []);
+    groups.get(s.category).push(s);
+  }
+  const container = $('source-settings');
+  container.innerHTML = '';
+  for (const [cat, sources] of groups) {
+    const allOn   = sources.every(s => !excluded.has(s.source));
+    const groupEl = document.createElement('div');
+    groupEl.className      = 'source-group';
+    groupEl.dataset.srcCat = cat;
+    groupEl.innerHTML = `
+      <div class="source-group-header">
+        <span class="source-cat-name">${cat}</span>
+        <button type="button" class="btn-src-all"
+          onclick="toggleSourceAll('${cat}')">${allOn ? '全て無効化' : '全て有効化'}</button>
+      </div>
+      <div class="source-checks">
+        ${sources.map(s => `
+          <label class="source-check">
+            <input type="checkbox" name="src" value="${s.source}" ${excluded.has(s.source) ? '' : 'checked'}>
+            ${s.source}
+          </label>`).join('')}
+      </div>`;
+    container.appendChild(groupEl);
+  }
+}
+
+function toggleSourceAll(cat) {
+  const group = document.querySelector(`#source-settings .source-group[data-src-cat="${cat}"]`);
+  const boxes = [...group.querySelectorAll('input[type=checkbox]')];
+  const allOn = boxes.every(cb => cb.checked);
+  boxes.forEach(cb => cb.checked = !allOn);
+  group.querySelector('.btn-src-all').textContent = allOn ? '全て有効化' : '全て無効化';
 }
 
 function saveSettings() {
@@ -985,6 +1028,7 @@ function saveSettings() {
   S.saveSettings({
     categories:       [...document.querySelectorAll('.cat-checks input:checked')].map(cb => cb.value),
     customCategories: (S.settings.customCategories || []),
+    excludedSources:  [...document.querySelectorAll('#source-settings input[type=checkbox]:not(:checked)')].map(cb => cb.value),
     maxItems:         parseInt($('setting-max').value, 10),
     focusKeywords:    $('setting-focus').value.trim(),
     excludeKeywords:  $('setting-exclude').value.trim(),
