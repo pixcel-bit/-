@@ -19,7 +19,6 @@ const S = {
       customCategories: [],
       excludedSources:  [],
       maxItems:         15,
-      focusKeywords:    '',
       excludeKeywords:  '',
       length:           'standard',
       tone:             'casual',
@@ -260,6 +259,33 @@ function isAIRelated(item) {
   return item.category === 'AI' || AI_KEYWORDS.some(kw => text.includes(kw));
 }
 
+// string[] → {topic,weight}[] への後方互換マイグレーション
+function migrateProfile(profile) {
+  if (!profile) return profile;
+  if (profile.positiveTopics?.length && typeof profile.positiveTopics[0] === 'string') {
+    profile.positiveTopics = profile.positiveTopics.map(t => ({ topic: t, weight: 1 }));
+  }
+  if (profile.negativeTopics?.length && typeof profile.negativeTopics[0] === 'string') {
+    profile.negativeTopics = profile.negativeTopics.map(t => ({ topic: t, weight: 1 }));
+  }
+  return profile;
+}
+
+// トピック配列に newTopics を追記（既存なら weight++、上限100語）
+function mergeTopics(existing, newTopics) {
+  const arr = existing ? [...existing] : [];
+  for (const topicStr of newTopics) {
+    if (!topicStr) continue;
+    const idx = arr.findIndex(t => t.topic === topicStr);
+    if (idx >= 0) {
+      arr[idx] = { ...arr[idx], weight: Math.min(arr[idx].weight + 1, 10) };
+    } else {
+      arr.push({ topic: topicStr, weight: 1 });
+    }
+  }
+  return arr.sort((a, b) => b.weight - a.weight).slice(0, 100);
+}
+
 // 記事の総合重要度スコア
 function computeScore(item, prefs, crossSourceMap) {
   let score = 0;
@@ -271,77 +297,78 @@ function computeScore(item, prefs, crossSourceMap) {
   }
   // グッド/バッドボタン実績
   score += scoreItemByPrefs(item, prefs);
-  // AIプロファイル（+4/-4点/トピック）
-  const profile = S.settings.aiProfile;
+  // AIプロファイル（weight×2点/トピック、合計±15点でキャップ）
+  const profile = migrateProfile(S.settings.aiProfile);
   if (profile) {
     const text = `${item.title} ${item.summary || ''} ${item.category}`;
-    for (const t of (profile.positiveTopics || [])) { if (text.includes(t)) score += 6; }
-    for (const t of (profile.negativeTopics || [])) { if (text.includes(t)) score -= 6; }
+    let posScore = 0, negScore = 0;
+    for (const t of (profile.positiveTopics || [])) {
+      if (text.includes(t.topic)) posScore += Math.min(t.weight * 2, 8);
+    }
+    for (const t of (profile.negativeTopics || [])) {
+      if (text.includes(t.topic)) negScore += Math.min(t.weight * 2, 8);
+    }
+    score += Math.min(posScore, 15) - Math.min(negScore, 15);
   }
   return score;
 }
 
 function likeNews(idx) {
   const broadcast = LS.getJSON(`nr_broadcast_${todayStr()}`);
-  if (!broadcast || !broadcast.news_items || !broadcast.news_items[idx]) return;
+  if (!broadcast?.news_items?.[idx]) return;
 
+  const item = broadcast.news_items[idx];
   const li = document.querySelector(`[data-news-index="${idx}"]`);
   if (!li) return;
 
-  const item = broadcast.news_items[idx];
   if (getLikedNews().some(l => l.title === item.title)) {
     showToast('すでにグッドしています');
     return;
   }
 
+  // 即座に Layer 3（行動履歴）に保存
+  const liked = getLikedNews();
+  liked.unshift({ date: todayStr(), category: item.category, title: item.title,
+    summary: (item.summary || '').slice(0, 100), reason: '', liked_at: new Date().toISOString() });
+  LS.setJSON('nr_liked_news', liked.slice(0, 100));
+
+  const likeBtn = li.querySelector('.like-btn');
+  if (likeBtn) { likeBtn.textContent = '👍 グッド済み'; likeBtn.classList.add('liked'); likeBtn.disabled = true; }
+  showToast('グッド！好みの分析に反映されます ✓');
+
+  // 任意の理由入力（Layer 2 更新用）
   let form = li.querySelector('.like-form');
   if (form) { form.remove(); return; }
-
   form = document.createElement('div');
   form.className = 'like-form';
   form.innerHTML = `
-    <textarea class="like-reason" placeholder="なぜ良かったですか？（任意・好みの分析に使われます）" rows="2"></textarea>
-    <button class="like-submit-btn" onclick="submitLike(${idx}, this)">👍 グッドを送信</button>
+    <textarea class="like-reason" placeholder="なぜ良かったですか？（任意・AIプロファイルを更新します）" rows="2"></textarea>
+    <div class="reason-form-btns">
+      <button class="like-submit-btn" onclick="submitLikeReason(${idx}, this)">送信してAIプロファイル更新</button>
+      <button class="reason-skip-btn" onclick="this.closest('.like-form').remove()">スキップ</button>
+    </div>
   `;
   li.appendChild(form);
   form.querySelector('.like-reason').focus();
 }
 
-function submitLike(idx, btn) {
+function submitLikeReason(idx, btn) {
   const broadcast = LS.getJSON(`nr_broadcast_${todayStr()}`);
-  if (!broadcast || !broadcast.news_items || !broadcast.news_items[idx]) return;
+  if (!broadcast?.news_items?.[idx]) return;
 
   const item = broadcast.news_items[idx];
   const form = btn.closest('.like-form');
   const reason = form.querySelector('.like-reason').value.trim();
-
-  const liked = getLikedNews();
-  if (liked.some(l => l.title === item.title)) {
-    showToast('すでにグッドしています');
-    form.remove();
-    return;
-  }
-
-  liked.unshift({
-    date: todayStr(),
-    category: item.category,
-    title: item.title,
-    summary: (item.summary || '').slice(0, 100),
-    reason,
-    liked_at: new Date().toISOString(),
-  });
-  LS.setJSON('nr_liked_news', liked.slice(0, 100));
-
-  const li = document.querySelector(`[data-news-index="${idx}"]`);
-  const likeBtn = li?.querySelector('.like-btn');
-  if (likeBtn) {
-    likeBtn.textContent = '👍 グッド済み';
-    likeBtn.classList.add('liked');
-    likeBtn.disabled = true;
-  }
   form.remove();
-  showToast('グッド！好みの分析に反映されます ✓');
-  if (reason) updateProfileFromReason(item, reason); // バックグラウンドでプロファイル更新
+
+  if (!reason) return;
+  // reason を nr_liked_news にも保存
+  const liked = getLikedNews();
+  const entry = liked.find(l => l.title === item.title);
+  if (entry) entry.reason = reason;
+  LS.setJSON('nr_liked_news', liked);
+
+  updateProfileFromReason(item, reason); // Layer 2
 }
 
 function dislikeNews(idx) {
@@ -349,31 +376,56 @@ function dislikeNews(idx) {
   if (!broadcast?.news_items?.[idx]) return;
 
   const item = broadcast.news_items[idx];
+  const li = document.querySelector(`[data-news-index="${idx}"]`);
+  if (!li) return;
+
   if (getDislikedNews().some(d => d.title === item.title)) {
     showToast('すでにバッドしています');
     return;
   }
 
+  // 即座に Layer 3（行動履歴）に保存
   const disliked = getDislikedNews();
-  disliked.unshift({
-    date:        todayStr(),
-    category:    item.category,
-    title:       item.title,
-    summary:     (item.summary || '').slice(0, 100),
-    disliked_at: new Date().toISOString(),
-  });
+  disliked.unshift({ date: todayStr(), category: item.category, title: item.title,
+    summary: (item.summary || '').slice(0, 100), disliked_at: new Date().toISOString() });
   LS.setJSON('nr_disliked_news', disliked.slice(0, 100));
 
-  const li     = document.querySelector(`[data-news-index="${idx}"]`);
-  const badBtn = li?.querySelector('.bad-btn');
+  const badBtn = li.querySelector('.bad-btn');
   if (badBtn) { badBtn.textContent = '👎 バッド済み'; badBtn.classList.add('disliked'); badBtn.disabled = true; }
   showToast('バッド！次回から優先度を下げます 👎');
+
+  // 任意の理由入力（Layer 2 更新用）
+  let form = li.querySelector('.dislike-form');
+  if (form) { form.remove(); return; }
+  form = document.createElement('div');
+  form.className = 'dislike-form';
+  form.innerHTML = `
+    <textarea class="like-reason" placeholder="なぜ興味がありませんでしたか？（任意・AIプロファイルを更新します）" rows="2"></textarea>
+    <div class="reason-form-btns">
+      <button class="dislike-submit-btn" onclick="submitDislikeReason(${idx}, this)">送信してAIプロファイル更新</button>
+      <button class="reason-skip-btn" onclick="this.closest('.dislike-form').remove()">スキップ</button>
+    </div>
+  `;
+  li.appendChild(form);
+  form.querySelector('.like-reason').focus();
+}
+
+function submitDislikeReason(idx, btn) {
+  const broadcast = LS.getJSON(`nr_broadcast_${todayStr()}`);
+  if (!broadcast?.news_items?.[idx]) return;
+
+  const item = broadcast.news_items[idx];
+  const form = btn.closest('.dislike-form');
+  const reason = form.querySelector('.like-reason').value.trim();
+  form.remove();
+
+  if (reason) updateProfileFromDislikeReason(item, reason); // Layer 2
 }
 
 async function updateProfileFromReason(item, reason) {
   if (!S.apiKey) return;
-  const cfg      = S.settings;
-  const existing = (cfg.aiProfile?.positiveTopics || []);
+  const cfg = S.settings;
+  const existing = (migrateProfile(cfg.aiProfile)?.positiveTopics || []).map(t => t.topic);
 
   const system = `ニュース記事とユーザーのコメントから、興味・関心を表す具体的なトピックを3〜5語抽出してください。
 JSONのみ返してください: {"newTopics": ["トピック1", "トピック2"]}
@@ -388,17 +440,46 @@ JSONのみ返してください: {"newTopics": ["トピック1", "トピック2"
     const newTopics = (parsed.newTopics || []).filter(t => t.length > 0);
     if (!newTopics.length) return;
 
-    const latest  = S.settings; // 再取得（並列変更考慮）
-    const profile = latest.aiProfile || { profileText: '', positiveTopics: [], positiveAngles: [], negativeTopics: [], analyzedAt: null };
-    const existingSet = new Set(profile.positiveTopics);
-    const added = newTopics.filter(t => !existingSet.has(t));
-    if (!added.length) return;
-
-    profile.positiveTopics = [...profile.positiveTopics, ...added];
-    profile.analyzedAt     = new Date().toISOString();
-    latest.aiProfile       = profile;
+    const latest  = S.settings;
+    const profile = migrateProfile(latest.aiProfile) || { profileText: '', positiveTopics: [], positiveAngles: [], negativeTopics: [], analyzedAt: null };
+    const before  = profile.positiveTopics.length;
+    profile.positiveTopics = mergeTopics(profile.positiveTopics, newTopics);
+    const added = profile.positiveTopics.length - before;
+    profile.analyzedAt = new Date().toISOString();
+    latest.aiProfile   = profile;
     S.saveSettings(latest);
-    showToast(`プロファイルを更新しました（+${added.length}語）✓`);
+    if (added > 0) showToast(`プロファイルを更新しました（+${added}語）✓`);
+    renderProfileResult(profile);
+  } catch { /* サイレント失敗 */ }
+}
+
+async function updateProfileFromDislikeReason(item, reason) {
+  if (!S.apiKey) return;
+  const cfg = S.settings;
+  const existing = (migrateProfile(cfg.aiProfile)?.negativeTopics || []).map(t => t.topic);
+
+  const system = `ニュース記事とユーザーのコメントから、ユーザーが興味なし・不要と感じる具体的なトピックを2〜4語抽出してください。
+JSONのみ返してください: {"newTopics": ["トピック1", "トピック2"]}
+ルール:
+- 既存トピック（${existing.join('、') || 'なし'}）と重複しない新しい視点を抽出
+- 「テクノロジー」より「芸能スキャンダル」「競馬・ギャンブル」のように具体的に
+- 日本語で返す`;
+
+  try {
+    const raw    = await callClaude(system, `記事: 【${item.category}】${item.title}\nコメント: ${reason}`);
+    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)[0]);
+    const newTopics = (parsed.newTopics || []).filter(t => t.length > 0);
+    if (!newTopics.length) return;
+
+    const latest  = S.settings;
+    const profile = migrateProfile(latest.aiProfile) || { profileText: '', positiveTopics: [], positiveAngles: [], negativeTopics: [], analyzedAt: null };
+    const before  = profile.negativeTopics.length;
+    profile.negativeTopics = mergeTopics(profile.negativeTopics, newTopics);
+    const added = profile.negativeTopics.length - before;
+    profile.analyzedAt = new Date().toISOString();
+    latest.aiProfile   = profile;
+    S.saveSettings(latest);
+    if (added > 0) showToast(`プロファイルを更新しました（-${added}語）✓`);
     renderProfileResult(profile);
   } catch { /* サイレント失敗 */ }
 }
@@ -475,16 +556,6 @@ async function loadToday() {
     if (cfg.excludeKeywords) {
       const excl = cfg.excludeKeywords.split(',').map(s => s.trim()).filter(Boolean);
       if (excl.length) items = items.filter(n => !excl.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
-    }
-
-    // 優先キーワード（先頭へ）
-    if (cfg.focusKeywords) {
-      const focus = cfg.focusKeywords.split(',').map(s => s.trim()).filter(Boolean);
-      if (focus.length) {
-        const hi = items.filter(n =>  focus.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
-        const lo = items.filter(n => !focus.some(kw => n.title.includes(kw) || (n.summary || '').includes(kw)));
-        items = [...hi, ...lo];
-      }
     }
 
     // ─── 重要度スコアで選定（カテゴリ多様性 + トピック重複排除）───
@@ -1076,7 +1147,6 @@ function populateSettings() {
   $('setting-max').value           = max;
   $('setting-max-val').textContent = max + '件';
 
-  $('setting-focus').value   = cfg.focusKeywords   || '';
   $('setting-exclude').value = cfg.excludeKeywords || '';
   $('setting-length').value  = cfg.length          || 'standard';
   $('setting-tone').value    = cfg.tone            || 'casual';
@@ -1092,30 +1162,49 @@ function populateSettings() {
   renderProfileResult(profile);
 }
 
-function renderProfileResult(profile) {
+function renderProfileResult(rawProfile) {
   const el = $('profile-result');
   if (!el) return;
+  const profile = migrateProfile(rawProfile);
   if (!profile?.analyzedAt) { el.style.display = 'none'; return; }
-  const pos = t => `<span class="profile-tag">${escHtml(t)}</span>`;
-  const neg = t => `<span class="profile-tag negative">${escHtml(t)}</span>`;
+
+  const topicTag = (t, cls) => {
+    const label = typeof t === 'string' ? t : t.topic;
+    const w     = typeof t === 'string' ? 1  : t.weight;
+    const extra = w >= 3 ? ' strong' : '';
+    const badge = w > 1 ? ` <small class="weight-badge">×${w}</small>` : '';
+    return `<span class="profile-tag ${cls}${extra}">${escHtml(label)}${badge}</span>`;
+  };
+
   el.innerHTML = `
     <div class="profile-result-row">
       <span class="profile-result-label">興味あり</span>
-      <div class="profile-tags">${(profile.positiveTopics || []).map(pos).join('')}</div>
+      <div class="profile-tags">${(profile.positiveTopics || []).map(t => topicTag(t, '')).join('')}</div>
     </div>
     ${(profile.positiveAngles || []).length ? `
     <div class="profile-result-row">
       <span class="profile-result-label">視点</span>
-      <div class="profile-tags">${profile.positiveAngles.map(pos).join('')}</div>
+      <div class="profile-tags">${profile.positiveAngles.map(t => topicTag(t, '')).join('')}</div>
     </div>` : ''}
     ${(profile.negativeTopics || []).length ? `
     <div class="profile-result-row">
       <span class="profile-result-label">興味なし</span>
-      <div class="profile-tags">${profile.negativeTopics.map(neg).join('')}</div>
+      <div class="profile-tags">${(profile.negativeTopics || []).map(t => topicTag(t, 'negative')).join('')}</div>
     </div>` : ''}
     <div class="profile-analyzed-at">最終分析: ${new Date(profile.analyzedAt).toLocaleString('ja-JP')}</div>
+    <button type="button" onclick="resetProfile()" class="btn-reset-profile">プロファイルをリセット</button>
   `;
   el.style.display = '';
+}
+
+function resetProfile() {
+  if (!confirm('AIプロファイルをリセットしますか？すべてのトピックが削除されます。')) return;
+  const cfg = S.settings;
+  cfg.aiProfile = null;
+  S.saveSettings(cfg);
+  if ($('profile-input')) $('profile-input').value = '';
+  renderProfileResult(null);
+  showToast('プロファイルをリセットしました');
 }
 
 async function analyzeProfile() {
@@ -1146,14 +1235,14 @@ async function analyzeProfile() {
     const raw    = await callClaude(system, `ユーザーの好み:\n${text}`);
     const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)[0]);
 
-    const cfg    = S.settings;
-    cfg.aiProfile = {
-      profileText:    text,
-      positiveTopics: parsed.positiveTopics || [],
-      positiveAngles: parsed.positiveAngles || [],
-      negativeTopics: parsed.negativeTopics || [],
-      analyzedAt:     new Date().toISOString(),
-    };
+    const cfg     = S.settings;
+    const profile = migrateProfile(cfg.aiProfile) || { profileText: '', positiveTopics: [], positiveAngles: [], negativeTopics: [], analyzedAt: null };
+    profile.profileText    = text;
+    profile.positiveTopics = mergeTopics(profile.positiveTopics, parsed.positiveTopics || []);
+    profile.positiveAngles = parsed.positiveAngles || profile.positiveAngles || [];
+    profile.negativeTopics = mergeTopics(profile.negativeTopics, parsed.negativeTopics || []);
+    profile.analyzedAt     = new Date().toISOString();
+    cfg.aiProfile = profile;
     S.saveSettings(cfg);
     renderProfileResult(cfg.aiProfile);
     showToast('プロファイルを保存しました ✓');
@@ -1213,7 +1302,6 @@ function saveSettings() {
     customCategories: (S.settings.customCategories || []),
     excludedSources:  [...document.querySelectorAll('#source-settings input[type=checkbox]:not(:checked)')].map(cb => cb.value),
     maxItems:         parseInt($('setting-max').value, 10),
-    focusKeywords:    $('setting-focus').value.trim(),
     excludeKeywords:  $('setting-exclude').value.trim(),
     length:           $('setting-length').value,
     tone:             $('setting-tone').value,

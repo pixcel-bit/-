@@ -1255,6 +1255,48 @@ details[open] .news-detail summary::before,
   opacity: 0.8;
 }
 
+.dislike-form {
+  margin-top: 10px;
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid #f44336;
+}
+
+.dislike-submit-btn {
+  margin-top: 8px;
+  padding: 6px 16px;
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.dislike-submit-btn:active { opacity: 0.8; }
+
+.reason-form-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.reason-skip-btn {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.reason-skip-btn:active { opacity: 0.7; }
+
 /* ─── ソース設定 ────────────────────────────────────────────────────────── */
 .source-group {
   margin-bottom: 14px;
@@ -1348,6 +1390,31 @@ details[open] .news-detail summary::before,
 .profile-tag.negative {
   background: #f44336;
 }
+
+.profile-tag.strong {
+  font-weight: 700;
+  opacity: 1;
+}
+
+.weight-badge {
+  opacity: 0.75;
+  font-size: 9px;
+  margin-left: 2px;
+}
+
+.btn-reset-profile {
+  margin-top: 10px;
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-reset-profile:active { opacity: 0.7; }
 
 .profile-analyzed-at {
   font-size: 11px;
