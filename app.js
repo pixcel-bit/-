@@ -159,47 +159,47 @@ async function fetchAllRSS() {
 function $(id) { return document.getElementById(id); }
 
 // ─── グッド・好み分析 ────────────────────────────────────────────────────────
-function getLikedNews() {
-  return LS.getJSON('nr_liked_news', []);
-}
+function getLikedNews()    { return LS.getJSON('nr_liked_news',    []); }
+function getDislikedNews() { return LS.getJSON('nr_disliked_news', []); }
 
 function getPreferences() {
-  const liked = getLikedNews();
-  if (!liked.length) return null;
+  const liked    = getLikedNews();
+  const disliked = getDislikedNews();
+  if (!liked.length && !disliked.length) return null;
 
-  const catCount = {};
-  for (const item of liked) {
-    catCount[item.category] = (catCount[item.category] || 0) + 1;
-  }
-
-  const text = liked.map(l => `${l.title} ${l.summary || ''} ${l.reason || ''}`).join(' ');
-  const words = text.match(/[一-鿿゠-ヿ]{2,}/g) || [];
   const stopWords = new Set(['ニュース', 'について', 'として', 'による', 'ために', 'こと', 'もの', 'それ', 'これ', 'その', 'どの', 'ある', 'いる', 'する', 'なる']);
-  const wordCount = {};
-  for (const w of words) {
-    if (!stopWords.has(w)) wordCount[w] = (wordCount[w] || 0) + 1;
-  }
 
-  const topKeywords = Object.entries(wordCount)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 15)
-    .map(([w]) => w);
+  // ── グッド集計 ──
+  const catCount = {};
+  for (const item of liked) catCount[item.category] = (catCount[item.category] || 0) + 1;
+  const likeWords = (liked.map(l => `${l.title} ${l.summary || ''} ${l.reason || ''}`).join(' ').match(/[一-鿿゠-ヿ]{2,}/g) || []);
+  const likeWordCount = {};
+  for (const w of likeWords) { if (!stopWords.has(w)) likeWordCount[w] = (likeWordCount[w] || 0) + 1; }
+  const topKeywords   = Object.entries(likeWordCount).sort((a,b) => b[1]-a[1]).slice(0,15).map(([w]) => w);
+  const topCategories = Object.entries(catCount).sort((a,b) => b[1]-a[1]).slice(0,3).map(([c]) => c);
 
-  const topCategories = Object.entries(catCount)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([c]) => c);
+  // ── バッド集計 ──
+  const dislikeCatCount = {};
+  for (const item of disliked) dislikeCatCount[item.category] = (dislikeCatCount[item.category] || 0) + 1;
+  const dislikeWords = (disliked.map(d => `${d.title} ${d.summary || ''}`).join(' ').match(/[一-鿿゠-ヿ]{2,}/g) || []);
+  const dislikeWordCount = {};
+  for (const w of dislikeWords) { if (!stopWords.has(w)) dislikeWordCount[w] = (dislikeWordCount[w] || 0) + 1; }
+  const topDislikeKeywords = Object.entries(dislikeWordCount).sort((a,b) => b[1]-a[1]).slice(0,10).map(([w]) => w);
 
-  return { topCategories, topKeywords, catCount, total: liked.length };
+  return { topCategories, topKeywords, catCount, total: liked.length,
+           dislikeCatCount, topDislikeKeywords, dislikeTotal: disliked.length };
 }
 
 function scoreItemByPrefs(item, prefs) {
   if (!prefs) return 0;
-  let score = (prefs.catCount[item.category] || 0) * 3;
+  let score = 0;
   const text = `${item.title} ${item.summary || ''}`;
-  for (const kw of prefs.topKeywords) {
-    if (text.includes(kw)) score += 2;
-  }
+  // グッドボーナス
+  score += (prefs.catCount[item.category] || 0) * 3;
+  for (const kw of prefs.topKeywords) { if (text.includes(kw)) score += 2; }
+  // バッドペナルティ
+  score -= (prefs.dislikeCatCount?.[item.category] || 0) * 3;
+  for (const kw of (prefs.topDislikeKeywords || [])) { if (text.includes(kw)) score -= 2; }
   return score;
 }
 
@@ -327,6 +327,32 @@ function submitLike(idx, btn) {
   }
   form.remove();
   showToast('グッド！好みの分析に反映されます ✓');
+}
+
+function dislikeNews(idx) {
+  const broadcast = LS.getJSON(`nr_broadcast_${todayStr()}`);
+  if (!broadcast?.news_items?.[idx]) return;
+
+  const item = broadcast.news_items[idx];
+  if (getDislikedNews().some(d => d.title === item.title)) {
+    showToast('すでにバッドしています');
+    return;
+  }
+
+  const disliked = getDislikedNews();
+  disliked.unshift({
+    date:        todayStr(),
+    category:    item.category,
+    title:       item.title,
+    summary:     (item.summary || '').slice(0, 100),
+    disliked_at: new Date().toISOString(),
+  });
+  LS.setJSON('nr_disliked_news', disliked.slice(0, 100));
+
+  const li     = document.querySelector(`[data-news-index="${idx}"]`);
+  const badBtn = li?.querySelector('.bad-btn');
+  if (badBtn) { badBtn.textContent = '👎 バッド済み'; badBtn.classList.add('disliked'); badBtn.disabled = true; }
+  showToast('バッド！次回から優先度を下げます 👎');
 }
 
 // ─── 起動 ─────────────────────────────────────────────────────────────────
@@ -479,20 +505,24 @@ async function generateScript(items, cfg, prefs = null) {
   const intro      = cfg.customIntro ? `冒頭に必ず次の文を入れてください: 「${cfg.customIntro}」\n\n` : '';
   const customCats = (cfg.customCategories || []).filter(Boolean);
   const customLine = customCats.length ? `- カスタムテーマ（以下のトピックを優先して取り上げてください）: ${customCats.join('、')}\n` : '';
-  const prefLine   = prefs && prefs.total > 0
+  const prefLine     = prefs && prefs.total > 0
     ? `- リスナーの好み（グッドボタン実績より）: 関心カテゴリ「${prefs.topCategories.join('・')}」、関心キーワード「${prefs.topKeywords.slice(0, 5).join('・')}」。これらに関連するニュースはより熱意を持って詳しく紹介してください。\n`
+    : '';
+  const dislikeLine  = prefs && prefs.dislikeTotal > 0
+    ? `- 興味なし（バッドボタン実績より）: カテゴリ「${Object.keys(prefs.dislikeCatCount).join('・')}」、キーワード「${prefs.topDislikeKeywords.slice(0, 5).join('・')}」。これらのトピックは簡潔にまとめるか省略してください。\n`
     : '';
 
   const system = `あなたはプロのラジオパーソナリティです。
 以下のニュース情報をもとに、${lengthMap[cfg.length] || lengthMap.standard}のラジオ放送原稿を作成してください。
 トーンは${toneMap[cfg.tone] || toneMap.casual}口調です。
 ${intro}ルール:
-${customLine}${prefLine}- です・ます調で自然な話し言葉
+${customLine}${prefLine}${dislikeLine}- です・ます調で自然な話し言葉
 - 難しい用語は噛み砕いて説明
 - 出力は原稿テキストのみ（見出し・箇条書き・記号・マークダウン不要）
 - 数字は日本語の読みに合わせて表記（例: 2025年→二〇二五年、1兆円→一兆円）
 - 英語略語は初出時にカナ読みを添える（例: AI（エーアイ）、GDP（ジーディーピー））
-- 文末は必ず「。」で終わらせ、読み上げ時に自然な間が取れるようにする`;
+- 文末は必ず「。」で終わらせ、読み上げ時に自然な間が取れるようにする
+- 2件目以降のニュースに移る際は必ず「次のニュースです。」という一文を入れてください（1件目の前は不要）`;
 
   const newsText = items.map((n, i) => `${i + 1}. 【${n.category}】${n.title}\n${n.summary || ''}`).join('\n\n');
 
@@ -537,9 +567,11 @@ function showPlayer(broadcast, isYesterday = false) {
 
   const list = $('home-news-list');
   list.innerHTML = '';
-  const likedTitles = new Set(getLikedNews().map(l => l.title));
+  const likedTitles    = new Set(getLikedNews().map(l => l.title));
+  const dislikedTitles = new Set(getDislikedNews().map(d => d.title));
   (broadcast.news_items || []).forEach((item, idx) => {
-    const isLiked = likedTitles.has(item.title);
+    const isLiked    = likedTitles.has(item.title);
+    const isDisliked = dislikedTitles.has(item.title);
     const li  = document.createElement('li');
     li.className = 'news-item';
     li.innerHTML = `
@@ -553,6 +585,7 @@ function showPlayer(broadcast, isYesterday = false) {
         <button class="news-btn" onclick="jumpToNewsAndPlay(${idx})">▶ ここから再生</button>
         <button class="news-btn" onclick="showDeepDiveModal(${idx})">🔍 深掘り</button>
         <button class="news-btn like-btn${isLiked ? ' liked' : ''}" onclick="likeNews(${idx})"${isLiked ? ' disabled' : ''}>${isLiked ? '👍 グッド済み' : '👍 グッド'}</button>
+        <button class="news-btn bad-btn${isDisliked ? ' disliked' : ''}" onclick="dislikeNews(${idx})"${isDisliked ? ' disabled' : ''}>${isDisliked ? '👎 バッド済み' : '👎 バッド'}</button>
       </div>
       ${item.url ? `<a class="news-source-link" href="${escHtml(item.url)}" target="_blank" rel="noopener">元記事を読む →</a>` : ''}`;
     li.dataset.newsIndex = idx;
@@ -626,24 +659,33 @@ function jumpToNewsAndPlay(newsIdx) {
   if (!mainChunks || mainChunks.length === 0) return;
 
   const items    = broadcast.news_items;
-  const item     = items[newsIdx];
   const perChunk = mainChunks.length / items.length;
 
-  // タイトルから3文字以上の語を抽出してチャンク内を検索
-  const keywords = (item.title.match(/[一-鿿゠-ヿ]{3,}|[A-Za-z]{4,}/g) || []).slice(0, 4);
-  // 前アイテムの推定終端以降から検索（オープニングや前アイテムへの誤マッチを防ぐ）
-  const searchFrom = Math.max(0, Math.floor((newsIdx - 0.5) * perChunk));
+  if (newsIdx === 0) {
+    // 1件目はイントロ直後 = チャンク0から再生
+    stopMainSpeak();
+    mainChunkIdx = 0;
+    startMainSpeak();
+    return;
+  }
 
-  let startChunk = Math.floor(newsIdx * perChunk); // フォールバック
-  for (let i = searchFrom; i < mainChunks.length; i++) {
-    if (keywords.some(kw => mainChunks[i].includes(kw))) {
-      startChunk = i;
-      break;
+  // 「次のニュースです。」セパレータのN番目を探す
+  let count = 0;
+  for (let i = 0; i < mainChunks.length; i++) {
+    if (mainChunks[i].includes('次のニュース')) {
+      count++;
+      if (count === newsIdx) {
+        stopMainSpeak();
+        mainChunkIdx = i;
+        startMainSpeak();
+        return;
+      }
     }
   }
 
+  // フォールバック: 均等分割 + イントロ半分オフセット
   stopMainSpeak();
-  mainChunkIdx = startChunk;
+  mainChunkIdx = Math.min(Math.floor(perChunk * 0.5 + newsIdx * perChunk), mainChunks.length - 1);
   startMainSpeak();
 }
 

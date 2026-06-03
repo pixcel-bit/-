@@ -1202,6 +1202,18 @@ details[open] .news-detail summary::before,
   cursor: default;
 }
 
+.bad-btn {
+  border-color: #f44336;
+  color: #f44336;
+}
+
+.bad-btn.disliked {
+  background: #f4433622;
+  color: #f44336;
+  opacity: 0.7;
+  cursor: default;
+}
+
 .like-form {
   margin-top: 10px;
   background: var(--surface2);
