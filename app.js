@@ -492,6 +492,17 @@ async function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+
+  setupMediaSessionHandlers();
+
+  // 画面復帰時: Wake Lock 再取得 + speechSynthesis が一時停止していれば再開
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && mainSpeaking) {
+      acquireWakeLock();
+      if (window.speechSynthesis?.paused) window.speechSynthesis.resume();
+    }
+  });
+
   if (!S.hasOnboarded) {
     showScreen('onboarding');
     return;
@@ -668,6 +679,37 @@ let mainChunkIdx = 0;
 let mainSpeaking = false;
 let mainSpeed    = 1.0;
 
+// ─── Wake Lock（再生中は画面OFFを防ぐ）────────────────────────────────────
+let _wakeLock = null;
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try { _wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+}
+function releaseWakeLock() {
+  _wakeLock?.release().catch(() => {});
+  _wakeLock = null;
+}
+
+// ─── Media Session（ロック画面に再生コントロールを表示）──────────────────
+function updateMediaSession(state, title) {
+  if (!('mediaSession' in navigator)) return;
+  if (state === 'playing') {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: title || '今日のニュースラジオ',
+      artist: 'Daily News Radio',
+    });
+    navigator.mediaSession.playbackState = 'playing';
+  } else {
+    navigator.mediaSession.playbackState = 'paused';
+  }
+}
+function setupMediaSessionHandlers() {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.setActionHandler('play',  () => { if (!mainSpeaking) toggleMainSpeak(); });
+  navigator.mediaSession.setActionHandler('pause', () => { if (mainSpeaking)  toggleMainSpeak(); });
+  navigator.mediaSession.setActionHandler('stop',  () => stopMainSpeak());
+}
+
 function showPlayer(broadcast, isYesterday = false) {
   setHomeState('player');
 
@@ -735,6 +777,8 @@ function startMainSpeak() {
   }
   mainSpeaking = true;
   $('play-btn').textContent = '⏸';
+  acquireWakeLock();
+  updateMediaSession('playing');
   speakMainChunk();
 }
 
@@ -745,6 +789,8 @@ function speakMainChunk() {
     $('main-chunk-info').textContent   = mainChunkIdx >= mainChunks.length ? '再生完了' : 'タップして再生';
     $('tts-progress-fill').style.width = mainChunkIdx >= mainChunks.length ? '100%' : '0%';
     if (mainChunkIdx >= mainChunks.length) mainChunkIdx = 0;
+    releaseWakeLock();
+    updateMediaSession('paused');
     return;
   }
 
@@ -768,6 +814,8 @@ function stopMainSpeak() {
   window.speechSynthesis.cancel();
   const btn = $('play-btn');
   if (btn) btn.textContent = '▶';
+  releaseWakeLock();
+  updateMediaSession('paused');
 }
 
 function setMainSpeed(rate, btn) {
