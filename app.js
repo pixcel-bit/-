@@ -1652,15 +1652,17 @@ function populateVoiceSelector() {
 
   const sel = $('setting-voice');
   if (!sel) return;
-  // 言語フィルターなしで全声を表示（iOSでlang codeが異なる場合があるため）
-  const voices = _cachedVoices;
+
+  const jaVoices = _cachedVoices.filter(v => v.lang.startsWith('ja'));
+  // 日本語声がない場合は全声を表示（フォールバック）
+  const voices = jaVoices.length ? jaVoices : _cachedVoices;
   if (!voices.length) return;
 
   sel.innerHTML = '<option value="">システムデフォルト</option>';
   voices.forEach(v => {
     const opt = document.createElement('option');
     opt.value       = v.name;
-    opt.textContent = v.name + (v.lang ? ` (${v.lang})` : '') + (v.localService ? '' : ' 〔オンライン〕');
+    opt.textContent = v.name + (jaVoices.length ? '' : ` (${v.lang})`);
     sel.appendChild(opt);
   });
 
