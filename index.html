@@ -236,9 +236,12 @@
           </label>
           <label>
             <span>読み上げの声 <small>（端末依存）</small></span>
-            <select id="setting-voice">
-              <option value="">システムデフォルト</option>
-            </select>
+            <div class="input-row">
+              <select id="setting-voice" style="flex:1">
+                <option value="">システムデフォルト</option>
+              </select>
+              <button type="button" class="btn-test-voice" onclick="testVoice()">テスト</button>
+            </div>
             <small>iOSは「O-Ren」が最も自然です</small>
           </label>
           <label>

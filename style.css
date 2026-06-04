@@ -695,6 +695,18 @@ details[open] .news-detail summary::before,
   flex-shrink: 0;
 }
 
+.btn-test-voice {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 0 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+  height: 40px;
+}
+
 .settings-section small {
   font-size: 11px;
   color: var(--text-muted);

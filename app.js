@@ -1551,9 +1551,30 @@ async function callClaude(system, userMsg) {
 }
 
 // ─── ユーティリティ ───────────────────────────────────────────────────────
+let _cachedVoices = [];
+
 function resolveVoice(name) {
   if (!name) return null;
-  return speechSynthesis.getVoices().find(v => v.name === name) || null;
+  const live = speechSynthesis.getVoices();
+  if (live.length > 0) _cachedVoices = live;
+  return _cachedVoices.find(v => v.name === name) || null;
+}
+
+function testVoice() {
+  const sel = $('setting-voice');
+  const name = sel ? sel.value : '';
+  const voice = resolveVoice(name);
+  speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance('こんにちは。これはテスト再生です。');
+  utt.lang = 'ja-JP';
+  utt.rate = parseFloat($('setting-rate')?.value || '1.0');
+  if (voice) {
+    utt.voice = voice;
+    showToast(`テスト再生: ${voice.name}`);
+  } else {
+    showToast(name ? `⚠️ 声が見つかりません: ${name}（デフォルト使用）` : 'テスト再生: デフォルト');
+  }
+  speechSynthesis.speak(utt);
 }
 
 function toggleVis(id) {
@@ -1622,9 +1643,12 @@ function removeCustomCategory(name) {
 
 // ─── 音声リスト ───────────────────────────────────────────────────────────
 function populateVoiceSelector() {
+  const all = speechSynthesis.getVoices();
+  if (all.length > 0) _cachedVoices = all;
+
   const sel = $('setting-voice');
   if (!sel) return;
-  const voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('ja'));
+  const voices = _cachedVoices.filter(v => v.lang.startsWith('ja'));
   if (!voices.length) return;
 
   sel.innerHTML = '<option value="">システムデフォルト</option>';
