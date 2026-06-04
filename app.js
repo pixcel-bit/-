@@ -26,6 +26,7 @@ const S = {
       customIntro:      '',
       aiProfile:        null,
       crossSourceEnabled: true,
+      playMode:           'voice',
     });
   },
   saveSettings(cfg) { LS.setJSON('nr_settings', cfg); },
@@ -916,9 +917,51 @@ function showPlayer(broadcast, isYesterday = false) {
     li.dataset.newsIndex = idx;
     list.appendChild(li);
   });
+
+  // モードに応じた初期アクション
+  _applyPlayModeUI(getPlayMode());
+  if (getPlayMode() === 'voice') {
+    setTimeout(() => startMainSpeak(), 400);
+  } else {
+    showToast('読み上げモード: ▶ボタンを押して2本指スワイプで読み上げ開始');
+  }
+}
+
+// ─── 再生モード管理 ───────────────────────────────────────────────────────
+function getPlayMode() {
+  return S.settings.playMode || 'voice';
+}
+
+function setPlayMode(mode) {
+  const cfg = S.settings;
+  cfg.playMode = mode;
+  S.saveSettings(cfg);
+  _applyPlayModeUI(mode);
+  if (mode === 'speakscreen') {
+    stopMainSpeak();
+    showToast('読み上げモード: 再生ボタンまたは「ここから再生」後、2本指で上からスワイプ');
+  } else {
+    closeReadingMode();
+    showToast('音声モード: 再生ボタンで Kyoko が読み上げます');
+  }
+}
+
+function _applyPlayModeUI(mode) {
+  const isSpeak = mode === 'speakscreen';
+  $('mode-btn-voice') ?.classList.toggle('active', !isSpeak);
+  $('mode-btn-speak') ?.classList.toggle('active',  isSpeak);
 }
 
 function toggleMainSpeak() {
+  if (getPlayMode() === 'speakscreen') {
+    if (_isReadingModeActive()) {
+      closeReadingMode();
+    } else {
+      if (mainChunkIdx >= mainChunks.length) mainChunkIdx = 0;
+      openReadingMode();
+    }
+    return;
+  }
   if (mainSpeaking) {
     stopMainSpeak();
   } else {
@@ -989,37 +1032,33 @@ function jumpToNewsAndPlay(newsIdx) {
   if (!broadcast || !broadcast.news_items) return;
   if (!mainChunks || mainChunks.length === 0) return;
 
+  const speakscreen = getPlayMode() === 'speakscreen';
   const items    = broadcast.news_items;
   const perChunk = mainChunks.length / items.length;
 
-  if (newsIdx === 0) {
-    stopMainSpeak();
-    mainChunkIdx = 0;
-    startMainSpeak();
-    if (_isReadingModeActive()) _setRmBgText(0);
-    return;
+  function _jumpTo(idx) {
+    mainChunkIdx = idx;
+    if (speakscreen) {
+      openReadingMode();
+    } else {
+      stopMainSpeak();
+      startMainSpeak();
+    }
   }
+
+  if (newsIdx === 0) { _jumpTo(0); return; }
 
   // 「次のニュースです。」セパレータのN番目を探す
   let count = 0;
   for (let i = 0; i < mainChunks.length; i++) {
     if (mainChunks[i].includes('次のニュース')) {
       count++;
-      if (count === newsIdx) {
-        stopMainSpeak();
-        mainChunkIdx = i;
-        startMainSpeak();
-        if (_isReadingModeActive()) _setRmBgText(i);
-        return;
-      }
+      if (count === newsIdx) { _jumpTo(i); return; }
     }
   }
 
-  // フォールバック: 均等分割 + イントロ半分オフセット
-  stopMainSpeak();
-  mainChunkIdx = Math.min(Math.floor(perChunk * 0.5 + newsIdx * perChunk), mainChunks.length - 1);
-  startMainSpeak();
-  if (_isReadingModeActive()) _setRmBgText(mainChunkIdx);
+  // フォールバック: 均等分割
+  _jumpTo(Math.min(Math.floor(perChunk * 0.5 + newsIdx * perChunk), mainChunks.length - 1));
 }
 
 // ─── 深掘りモーダル & ロジック ────────────────────────────────────────────────
@@ -1365,6 +1404,7 @@ function populateSettings() {
   populateVoiceSelector();
   if (cfg.voiceName) $('setting-voice').value = cfg.voiceName;
   $('setting-cross-source').checked = cfg.crossSourceEnabled !== false;
+  _applyPlayModeUI(cfg.playMode || 'voice');
   renderCustomCategories();
   renderSourceSettings();
   const profile = S.settings.aiProfile;
@@ -1520,6 +1560,7 @@ function saveSettings() {
     voiceName:        $('setting-voice').value,
     aiProfile:           S.settings.aiProfile || null,
     crossSourceEnabled:  $('setting-cross-source').checked,
+    playMode:            S.settings.playMode || 'voice',
   });
 
   showToast('設定を保存しました ✓');

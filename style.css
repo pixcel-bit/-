@@ -242,24 +242,39 @@ html, body {
   min-height: 44px;
 }
 
-/* ─── O-Ren 読み上げモード ── */
-.osren-btn {
-  display: block;
-  width: 100%;
+/* ─── 再生モード切り替え ── */
+.mode-toggle {
+  display: flex;
   margin-top: 8px;
-  padding: 9px;
-  background: transparent;
-  border: 1px solid #4a9eff;
-  color: #4a9eff;
+  border: 1px solid var(--border);
   border-radius: 10px;
+  overflow: hidden;
+}
+
+.mode-toggle-btn {
+  flex: 1;
+  padding: 9px 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
   font-size: 13px;
   cursor: pointer;
   font-family: inherit;
   transition: all 0.2s;
 }
-.osren-btn:active {
-  background: #4a9eff;
-  color: white;
+
+.mode-toggle-btn:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.mode-toggle-btn.active {
+  background: #0f2540;
+  color: #4a9eff;
+  font-weight: 600;
+}
+
+.mode-toggle-btn:active {
+  background: var(--surface2);
 }
 
 /* 背後テキスト：視覚的に不可視、アクセシビリティツリーには存在 */

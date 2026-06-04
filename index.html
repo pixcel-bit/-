@@ -82,7 +82,10 @@
             <button class="speed-btn" onclick="setMainSpeed(1.5,this)">1.5x</button>
           </div>
           <button class="duo-preview-btn" id="duo-preview-btn" onclick="startDuoPreview()">🎙 2人で聴く（β）</button>
-          <button class="osren-btn" id="osren-btn" onclick="openReadingMode()">📖 O-Ren で聴く</button>
+          <div class="mode-toggle">
+            <button class="mode-toggle-btn" id="mode-btn-voice" onclick="setPlayMode('voice')">🔊 音声モード</button>
+            <button class="mode-toggle-btn" id="mode-btn-speak" onclick="setPlayMode('speakscreen')">🎧 読み上げモード</button>
+          </div>
         </div>
 
         <!-- 2人版プレイヤー -->

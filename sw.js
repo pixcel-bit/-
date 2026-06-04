@@ -1,4 +1,4 @@
-const CACHE = 'news-radio-v6';
+const CACHE = 'news-radio-v7';
 const STATIC = ['style.css', 'app.js', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', e => {
