@@ -292,16 +292,16 @@
       <button class="tab-btn"        data-tab="archive"  onclick="switchTab('archive')"><span class="tab-icon">📋</span><span>履歴</span></button>
       <button class="tab-btn"        data-tab="settings" onclick="switchTab('settings')"><span class="tab-icon">⚙️</span><span>設定</span></button>
     </nav>
+
+    <!-- 読み上げモード中に表示するバッジ（#screen-main内に置くことでaria-hidden対象に含まれる） -->
+    <div id="rm-badge" style="display:none" aria-hidden="true">
+      <span>☝️☝️ 2本指で上からスワイプ → 読み上げ開始</span>
+      <button onclick="closeReadingMode()">終了</button>
+    </div>
   </div>
 
   <!-- 原稿テキスト：背後に配置、目に見えないがアクセシビリティツリーに存在 -->
   <div id="rm-bg-text" aria-hidden="true"></div>
-
-  <!-- 読み上げモード中に表示するバッジ -->
-  <div id="rm-badge" style="display:none" aria-hidden="true">
-    <span>☝️☝️ 2本指で上からスワイプ → O-Ren 読み上げ開始</span>
-    <button onclick="closeReadingMode()">終了</button>
-  </div>
 
 </div>
 <script src="app.js"></script>
