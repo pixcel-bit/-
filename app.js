@@ -1552,11 +1552,18 @@ async function callClaude(system, userMsg) {
 
 // ─── 原稿読み上げモード（iOS Speak Screen 用） ────────────────────────────
 function openReadingMode() {
+  // home-script が空の場合は mainChunks からフォールバック
   const scriptEl = $('home-script');
-  const text = scriptEl ? scriptEl.textContent.trim() : '';
-  if (!text) { showToast('原稿がありません'); return; }
+  let text = scriptEl ? scriptEl.textContent.trim() : '';
+  if (!text && typeof mainChunks !== 'undefined' && mainChunks.length) {
+    text = mainChunks.join('');
+  }
+  if (!text) { showToast('原稿がありません。先にニュースを読み込んでください'); return; }
 
+  const rmEl = $('reading-mode');
   const content = $('rm-content');
+  if (!rmEl || !content) { showToast('読み上げモードを初期化できませんでした'); return; }
+
   content.innerHTML = '';
   text.split(/\n+/).filter(l => l.trim()).forEach(line => {
     const p = document.createElement('p');
@@ -1564,14 +1571,14 @@ function openReadingMode() {
     content.appendChild(p);
   });
 
-  $('reading-mode').style.display = 'flex';
+  rmEl.style.display = 'flex';
   content.scrollTop = 0;
-  // 再生中は一時停止（読み上げモードに集中）
-  if (mainSpeaking) toggleMainSpeak();
+  if (typeof mainSpeaking !== 'undefined' && mainSpeaking) toggleMainSpeak();
 }
 
 function closeReadingMode() {
-  $('reading-mode').style.display = 'none';
+  const rmEl = $('reading-mode');
+  if (rmEl) rmEl.style.display = 'none';
 }
 
 // ─── ユーティリティ ───────────────────────────────────────────────────────
