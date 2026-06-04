@@ -1552,6 +1552,11 @@ async function callClaude(system, userMsg) {
 
 // ─── ユーティリティ ───────────────────────────────────────────────────────
 let _cachedVoices = [];
+const _JA_VOICE_NAMES = ['Kyoko', 'O-Ren', 'O-ren', 'Otoya'];
+
+function _isJaVoice(v) {
+  return v.lang.startsWith('ja') || _JA_VOICE_NAMES.some(n => v.name.includes(n));
+}
 
 function resolveVoice(name) {
   if (!name) return null;
@@ -1561,14 +1566,13 @@ function resolveVoice(name) {
 }
 
 function reloadVoices() {
-  // iOS は speechSynthesis を一度キャンセルすると声リストが再ロードされることがある
   speechSynthesis.cancel();
   _cachedVoices = [];
   setTimeout(() => {
     const live = speechSynthesis.getVoices();
     if (live.length > 0) _cachedVoices = live;
     populateVoiceSelector();
-    const count = _cachedVoices.filter(v => v.lang.startsWith('ja')).length;
+    const count = _cachedVoices.filter(_isJaVoice).length;
     showToast(`日本語の声: ${count}件`);
   }, 300);
 }
@@ -1666,16 +1670,16 @@ function populateVoiceSelector() {
   const sel = $('setting-voice');
   if (!sel) return;
 
-  const jaVoices = _cachedVoices.filter(v => v.lang.startsWith('ja'));
-  // 日本語声がない場合は全声を表示（フォールバック）
-  const voices = jaVoices.length ? jaVoices : _cachedVoices;
-  if (!voices.length) return;
+  // lang が ja-JP 以外でも既知の日本語声名でマッチ（Safari iOS 対応）
+  const jaVoices = _cachedVoices.filter(_isJaVoice);
 
   sel.innerHTML = '<option value="">システムデフォルト</option>';
-  voices.forEach(v => {
+  if (!jaVoices.length) return; // 見つからなければシステムデフォルトのみ
+
+  jaVoices.forEach(v => {
     const opt = document.createElement('option');
     opt.value       = v.name;
-    opt.textContent = v.name + (jaVoices.length ? '' : ` (${v.lang})`);
+    opt.textContent = v.name;
     sel.appendChild(opt);
   });
 
