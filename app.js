@@ -38,6 +38,15 @@ const S = {
     idx = idx.filter(e => e.date !== date);
     idx.unshift({ date, news_count: (data.news_items || []).length });
     LS.setJSON('nr_archive_index', idx.slice(0, 30));
+    this.addSeenTitles((data.news_items || []).map(n => n.title));
+  },
+
+  getSeenTitles() { return LS.getJSON('nr_seen_titles', []); },
+  addSeenTitles(titles) {
+    const seen = new Set(this.getSeenTitles());
+    titles.forEach(t => seen.add(t));
+    // 最新 500 件に絞る（古いものから自然に押し出し）
+    LS.setJSON('nr_seen_titles', [...seen].slice(-500));
   },
   delCachedBroadcast(date) {
     LS.del(`nr_broadcast_${date}`);
@@ -583,12 +592,17 @@ async function loadToday() {
       .map(item => ({ ...item, _score: computeScore(item, prefs, crossSourceMap) }))
       .sort((a, b) => b._score - a._score);
 
+    // 既出タイトルを除外（新規記事が5件以上ある場合のみ適用）
+    const seenTitles = new Set(S.getSeenTitles());
+    const freshScored = scored.filter(item => !seenTitles.has(item.title));
+    const pool = freshScored.length >= Math.min(5, maxItems) ? freshScored : scored;
+
     const selected = [];
     const usedCats = new Set();
     const coveredTopics = new Set();
 
     // 第1パス：各カテゴリから、トピック重複のない最高スコア記事を1件確保
-    for (const item of scored) {
+    for (const item of pool) {
       if (selected.length >= maxItems) break;
       if (!usedCats.has(item.category) && (!hasTopicOverlap(item.title, coveredTopics) || isAIRelated(item))) {
         selected.push(item);
@@ -597,14 +611,14 @@ async function loadToday() {
       }
     }
     // 第2パス：残枠をスコア順で埋める（トピック重複は除外）
-    for (const item of scored) {
+    for (const item of pool) {
       if (selected.length >= maxItems) break;
       if (!selected.some(s => s.title === item.title) && (!hasTopicOverlap(item.title, coveredTopics) || isAIRelated(item))) {
         selected.push(item);
         markTopicCovered(item.title, coveredTopics);
       }
     }
-    // 第3パス：件数が足りない場合はトピック重複も許容してフォールバック
+    // 第3パス：件数が足りない場合は全候補（既出含む）でフォールバック
     if (selected.length < Math.min(5, maxItems)) {
       for (const item of scored) {
         if (selected.length >= maxItems) break;
