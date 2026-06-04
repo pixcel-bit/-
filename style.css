@@ -1420,7 +1420,7 @@ details[open] .news-detail summary::before,
   background: transparent;
   border: none;
   color: var(--text);
-  font-size: 13px;
+  font-size: 16px;
   resize: none;
   font-family: inherit;
   outline: none;
