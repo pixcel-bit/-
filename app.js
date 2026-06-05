@@ -27,6 +27,7 @@ const S = {
       aiProfile:        null,
       crossSourceEnabled: true,
       playMode:           'voice',
+      maxPerCategory:     2,
     });
   },
   saveSettings(cfg) { LS.setJSON('nr_settings', cfg); },
@@ -610,9 +611,11 @@ async function loadToday() {
         markTopicCovered(item.title, coveredTopics);
       }
     }
-    // 第2パス：残枠をスコア順で埋める（トピック重複は除外）
+    // 第2パス：残枠をスコア順で埋める（カテゴリ上限・トピック重複を考慮）
+    const maxPerCat = cfg.maxPerCategory ?? 2; // 0 = 制限なし
     for (const item of pool) {
       if (selected.length >= maxItems) break;
+      if (maxPerCat > 0 && selected.filter(s => s.category === item.category).length >= maxPerCat) continue;
       if (!selected.some(s => s.title === item.title) && (!hasTopicOverlap(item.title, coveredTopics) || isAIRelated(item))) {
         selected.push(item);
         markTopicCovered(item.title, coveredTopics);
@@ -1413,6 +1416,7 @@ function populateSettings() {
   $('setting-max').value           = max;
   $('setting-max-val').textContent = max + '件';
 
+  $('setting-max-per-cat').value = String(cfg.maxPerCategory ?? 2);
   $('setting-exclude').value = cfg.excludeKeywords || '';
   $('setting-length').value  = cfg.length          || 'standard';
   $('setting-tone').value    = cfg.tone            || 'casual';
@@ -1578,6 +1582,7 @@ function saveSettings() {
     aiProfile:           S.settings.aiProfile || null,
     crossSourceEnabled:  $('setting-cross-source').checked,
     playMode:            S.settings.playMode || 'voice',
+    maxPerCategory:      parseInt($('setting-max-per-cat').value, 10),
   });
 
   showToast('設定を保存しました ✓');

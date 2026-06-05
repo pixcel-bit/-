@@ -206,6 +206,15 @@
             </div>
           </label>
           <label>
+            <span>カテゴリあたりの上限 <small>（テック偏りを抑えたい場合は少なく）</small></span>
+            <select id="setting-max-per-cat">
+              <option value="1">1件（カテゴリ多様性を最優先）</option>
+              <option value="2" selected>2件（バランス重視）</option>
+              <option value="3">3件</option>
+              <option value="0">制限なし</option>
+            </select>
+          </label>
+          <label>
             <span>除外するキーワード <small>（カンマ区切り）</small></span>
             <input type="text" id="setting-exclude" placeholder="例: 芸能, 競馬">
           </label>
