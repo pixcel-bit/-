@@ -223,12 +223,8 @@
         <section class="settings-section">
           <h3>番組スタイル</h3>
           <label>
-            <span>番組の長さ</span>
-            <select id="setting-length">
-              <option value="short">短め（約3分）</option>
-              <option value="standard" selected>標準（約5分）</option>
-              <option value="long">詳しめ（約10分）</option>
-            </select>
+            <span>番組の長さ <small>（分）</small></span>
+            <input type="number" id="setting-length-min" min="1" max="120" value="5" style="width:80px">
           </label>
           <label>
             <span>ナレーションのトーン</span>

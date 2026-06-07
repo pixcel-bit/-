@@ -663,7 +663,9 @@ async function regenerateToday() {
 }
 
 async function generateScript(items, cfg, prefs = null) {
-  const lengthMap = { short: '約3分（400字程度）', standard: '約5分（800字程度）', long: '約10分（1600字程度）' };
+  const legacyLengthMap = { short: 3, standard: 5, long: 10 };
+  const lengthMin = cfg.lengthMinutes || legacyLengthMap[cfg.length] || 5;
+  const lengthText = `約${lengthMin}分（${lengthMin * 160}字程度）`;
   const toneMap   = { casual: 'カジュアルで親しみやすい', professional: '落ち着いたプロフェッショナルな', cheerful: '元気で明るい朝らしい' };
 
   const intro      = cfg.customIntro ? `冒頭に必ず次の文を入れてください: 「${cfg.customIntro}」\n\n` : '';
@@ -681,7 +683,7 @@ async function generateScript(items, cfg, prefs = null) {
     : '';
 
   const system = `あなたはプロのラジオパーソナリティです。
-以下のニュース情報をもとに、${lengthMap[cfg.length] || lengthMap.standard}のラジオ放送原稿を作成してください。
+以下のニュース情報をもとに、${lengthText}のラジオ放送原稿を作成してください。
 トーンは${toneMap[cfg.tone] || toneMap.casual}口調です。
 ${intro}ルール:
 ${customLine}${prefLine}${dislikeLine}${profileLine}- です・ます調で自然な話し言葉
@@ -705,7 +707,8 @@ let duoVoiceA  = null;
 let duoVoiceB  = null;
 
 async function generateDuoScript(items, cfg) {
-  const lengthMap = { short: '約3分', standard: '約5分', long: '約10分' };
+  const duoLegacyMap = { short: 3, standard: 5, long: 10 };
+  const duoLengthMin = cfg.lengthMinutes || duoLegacyMap[cfg.length] || 5;
   const newsText  = items.map((n, i) => `${i+1}. 【${n.category}】${n.title}\n${n.summary || ''}`).join('\n\n');
 
   const system = `あなたは日本語ラジオ番組の台本作家です。
@@ -718,7 +721,7 @@ async function generateDuoScript(items, cfg) {
 - 「そうなんですよ」「えー！」「なるほど」「それは気になりますね」「実は」「ちなみに」などの自然なフィラーを入れる
 - 驚き・共感・疑問など感情の起伏をつける
 - ニュースとニュースの間を自然な一言でつなぐ
-- 全体で${lengthMap[cfg.length] || '約5分'}程度
+- 全体で約${duoLengthMin}分程度
 - 出力は台本テキストのみ（説明文・見出し不要）
 - 数字は読み仮名で（例: 2025年→二〇二五年、1兆円→一兆円）`;
 
@@ -1428,7 +1431,8 @@ function populateSettings() {
 
   $('setting-max-per-cat').value = String(cfg.maxPerCategory ?? 2);
   $('setting-exclude').value = cfg.excludeKeywords || '';
-  $('setting-length').value  = cfg.length          || 'standard';
+  const legacyMinMap = { short: 3, standard: 5, long: 10 };
+  $('setting-length-min').value = String(cfg.lengthMinutes || legacyMinMap[cfg.length] || 5);
   $('setting-tone').value    = cfg.tone            || 'casual';
   $('setting-rate').value    = String(cfg.speechRate ?? 1.0);
   $('setting-intro').value   = cfg.customIntro     || '';
@@ -1584,7 +1588,7 @@ function saveSettings() {
     excludedSources:  [...document.querySelectorAll('#source-settings input[type=checkbox]:not(:checked)')].map(cb => cb.value),
     maxItems:         parseInt($('setting-max').value, 10),
     excludeKeywords:  $('setting-exclude').value.trim(),
-    length:           $('setting-length').value,
+    lengthMinutes:    parseInt($('setting-length-min').value, 10) || 5,
     tone:             $('setting-tone').value,
     speechRate:       parseFloat($('setting-rate').value),
     customIntro:      $('setting-intro').value.trim(),
