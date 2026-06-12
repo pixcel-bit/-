@@ -573,6 +573,7 @@ async function loadToday() {
 
   setHomeState('generating');
   $('home-gen-msg').textContent = '今日のニュースを取得中...';
+  acquireWakeLock();
 
   try {
     const allItems = await fetchAllRSS();
@@ -646,8 +647,10 @@ async function loadToday() {
 
     const broadcast = { date: today, news_items: items, script, generated_at: new Date().toISOString() };
     S.setCachedBroadcast(today, broadcast);
+    releaseWakeLock();
     showPlayer(broadcast);
   } catch (e) {
+    releaseWakeLock();
     setHomeState('error');
     $('home-error-msg').textContent = e.message;
   }
